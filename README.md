@@ -115,7 +115,7 @@ surface:
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `DF_HOME` | `~/DwarfFortress/df_linux` | extracted DF tree (has `dfhack`/`dfhack-run`) |
+| `DF_HOME` | `~/DwarfFortressFishbowl/df_linux` | extracted DF tree (has `dfhack`/`dfhack-run`); a dedicated dir so it never touches a DF install you play on |
 | `LOG_FILE` | `$DF_HOME/df-ai.log` | df-ai narration log (shown on log outputs) |
 | `SESSION` | `fishbowl` | tmux session name for the running DF |
 | `TERMINAL` | `foot` | display terminal (see Terminals) |

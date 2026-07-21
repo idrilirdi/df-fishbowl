@@ -44,7 +44,7 @@ echo "Detected session: $ENV    prefix: $PREFIX"
 echo
 
 # --- URLs (DF 0.47.05 + DFHack r1 + BenLubar df-ai) --------------------------
-DF_ROOT="${DF_ROOT:-$HOME/DwarfFortress}"
+DF_ROOT="${DF_ROOT:-$HOME/DwarfFortressFishbowl}"
 DF_HOME="$DF_ROOT/df_linux"
 DF_URL="https://www.bay12games.com/dwarves/df_47_05_linux.tar.bz2"
 DFHACK_URL="https://github.com/DFHack/dfhack/releases/download/0.47.05-r1/dfhack-0.47.05-r1-Linux-64bit-gcc-7.tar.bz2"

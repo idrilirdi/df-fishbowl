@@ -8,7 +8,7 @@
 # Usage: df/apply-df-settings.sh [DF_HOME]
 set -euo pipefail
 
-DF_HOME="${1:-${DF_HOME:-$HOME/DwarfFortress/df_linux}}"
+DF_HOME="${1:-${DF_HOME:-$HOME/DwarfFortressFishbowl/df_linux}}"
 REPO="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
 init="$DF_HOME/data/init/init.txt"
 dfhack_init="$DF_HOME/dfhack.init"
