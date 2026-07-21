@@ -105,15 +105,15 @@ backend_render() {
 	# directly; foot/xterm/alacritty/urxvt use -e.
 	local -a term wtl=(--maximized) footopts=()
 
-	# Center the mirrored fortress on larger screens. foot fills each output, but
-	# `pad` insets its grid WITHIN that surface, so we pad every fortress foot
-	# down to the smallest fortress output's size: that screen fills, larger ones
-	# show the same grid centered with padding around it, and — because every
-	# fortress foot now renders one identical grid — the shared tmux session has a
-	# single consistent size (no top-left "dots"). foot-only; the log tails fill.
+	# Center the mirrored fortress on every screen. foot fills each output, but
+	# `pad` insets its grid WITHIN that surface, so we pad every fortress foot down
+	# to the largest rectangle common to all fortress outputs (fortress_ref_pixels;
+	# a per-axis min that fits inside each one regardless of aspect ratio). Every
+	# fortress foot then renders one identical grid, centered, so the shared tmux
+	# session is consistent and no screen is cut off. foot-only; the log fills.
 	if [ "$role" != log ] && [ "$TERMINAL" = foot ] && [ "$FORTRESS_MODE" != multi ]; then
 		local ref this rw rh ow oh px py
-		ref="$(smallest_fortress_pixels)"
+		ref="$(fortress_ref_pixels)"
 		this="$(output_pixels "$out")"
 		if [ -n "$ref" ] && [ -n "$this" ]; then
 			rw="${ref%x*}"; rh="${ref#*x}"; ow="${this%x*}"; oh="${this#*x}"
@@ -162,4 +162,100 @@ backend_render() {
 	# Whatever happened above, do not let the --command-each instance exit while
 	# the session is locked; swaylock-plugin will terminate us on unlock.
 	exec sleep 2147483647
+}
+
+# ---------------------------------------------------------------------------
+# Non-secure "screensaver" mode
+# ---------------------------------------------------------------------------
+# DF shown fullscreen on each output with NO lock and NO password gate, dismissed
+# with Ctrl-C (or by an idle daemon's `resume`). It never touches your
+# environment's real locker, needs neither swaylock-plugin nor windowtolayer, and
+# works on any Wayland compositor — so it's the easiest way to try fishbowl out
+# before committing to the secure-lock setup, and a sane option on desktops where
+# replacing the native locker isn't wanted. On Sway each terminal is placed on
+# its output and fullscreened via swaymsg; elsewhere the compositor/terminal
+# handles fullscreen.
+_ss_pids=()
+_ss_cleanup() {
+	trap - INT TERM EXIT
+	log_msg "screensaver: tearing down"
+	# Remove the temporary Esc-to-quit binding we added on Sway.
+	if command -v swaymsg >/dev/null 2>&1 && [ -n "${SWAYSOCK:-}" ]; then
+		swaymsg 'unbindsym Escape' >/dev/null 2>&1 || true
+	fi
+	local p
+	for p in "${_ss_pids[@]}"; do kill "$p" 2>/dev/null || true; done
+	stop_all_df
+}
+
+# Launch one fullscreen terminal (replacing this subshell) for a role.
+#   $1 app-id  $2 inner command  $3.. extra terminal opts (foot only)
+_ss_spawn() {
+	local app="$1" inner="$2"
+	shift 2
+	case "$TERMINAL" in
+	foot) exec foot --app-id="$app" "$@" -e sh -c "$inner" ;;
+	kitty) exec kitty --class="$app" --start-as=fullscreen sh -c "$inner" ;;
+	alacritty) exec alacritty --class "$app" -o window.startup_mode='"Fullscreen"' -e sh -c "$inner" ;;
+	*) exec "$TERMINAL" -e sh -c "$inner" ;;
+	esac
+}
+
+backend_screensaver() {
+	_wl_ensure_fortresses
+
+	local app="df_fishbowl-saver" have_sway=0
+	if command -v swaymsg >/dev/null 2>&1 && [ -n "${SWAYSOCK:-}" ]; then
+		have_sway=1
+		swaymsg "for_window [app_id=\"$app\"] fullscreen enable" >/dev/null 2>&1 || true
+		# Esc anywhere sends us SIGTERM (the fullscreen fortress otherwise has the
+		# keyboard focus, so a plain Ctrl-C wouldn't reach us). Removed on cleanup.
+		swaymsg "bindsym Escape exec kill -TERM $$" >/dev/null 2>&1 || true
+	fi
+
+	# Announce how to quit, then pause 2s so it's readable before the fullscreen
+	# fortress covers this terminal.
+	if [ "$have_sway" = 1 ]; then
+		log_msg "screensaver starting in 2s — press Esc (anywhere) or Ctrl+C (in this terminal) to exit"
+	else
+		log_msg "screensaver starting in 2s — press Ctrl+C in this terminal to exit"
+	fi
+	sleep 2
+
+	trap '_ss_cleanup; exit 0' INT TERM
+	trap '_ss_cleanup' EXIT
+
+	# Same reference grid + centering the lock uses, so the fortress fills/centres
+	# consistently across mismatched screens.
+	local ref rw rh
+	ref="$(fortress_ref_pixels)"
+	rw="${ref%x*}"
+	rh="${ref#*x}"
+
+	local name role w h sess inner
+	while read -r name role w h; do
+		sess="$(df_session_name "$name")"
+		if [ "$role" = log ]; then
+			inner="exec tail -n 200 -F \"$LOG_FILE\""
+		else
+			inner="exec tmux attach -r -t ${sess}"
+		fi
+		local -a opts=()
+		if [ "$role" != log ] && [ "$TERMINAL" = foot ]; then
+			[ -n "$FORTRESS_FONT" ] && opts+=(-o "font=${FORTRESS_FONT}${FORTRESS_FONT_SIZE:+:size=$FORTRESS_FONT_SIZE}")
+			if [ -n "$ref" ]; then
+				local px=$(((w - rw) / 2)) py=$(((h - rh) / 2))
+				[ "$px" -lt 0 ] && px=0
+				[ "$py" -lt 0 ] && py=0
+				opts+=(-o "pad=${px}x${py} center")
+			fi
+		fi
+		[ "$have_sway" = 1 ] && swaymsg "focus output \"$name\"" >/dev/null 2>&1 || true
+		_ss_spawn "$app" "$inner" "${opts[@]}" &
+		_ss_pids+=($!)
+		sleep 0.3
+	done < <(assign_roles)
+
+	log_msg "screensaver running on ${#_ss_pids[@]} output(s) — Ctrl-C to stop"
+	wait
 }

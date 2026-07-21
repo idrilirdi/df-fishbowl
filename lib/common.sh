@@ -64,9 +64,30 @@ df_session_name() {
 
 df_session_running() { tmux has-session -t "$1" 2>/dev/null; }
 
-# Start DF (if not already running) in a detached tmux session named $1.
-# df-ai plays autonomously; a new fortress is launched with no +load-save so
-# df-ai's random_embark takes over.
+# Align df-ai's embark settings with our load decision, in place in df-ai.json.
+# df-ai's `random_embark` auto-embarks a NEW fort at startup, which OVERWRITES
+# whatever save was loaded — so continuing an existing fortress requires it OFF
+# (df-ai then just plays the loaded fort), and a genuinely new fortress requires
+# it ON with an empty `random_embark_world` (generate a fresh world) rather than
+# a fixed one (which would re-embark in the same world every time). df-ai.json
+# has // comments so jq can't parse it; edit the two fields with sed.
+#   configure_dfai continue [WORLD]   # play the loaded save, do not re-embark
+#   configure_dfai new                # generate a new world and embark
+configure_dfai() {
+	local mode="$1" world="${2:-}" json="$DF_HOME/hack/df-ai.json"
+	[ -f "$json" ] || return 0
+	local embark ew
+	if [ "$mode" = new ]; then embark=true; ew=""; else embark=false; ew="$world"; fi
+	sed -i -E \
+		-e "s/(\"random_embark\"[[:space:]]*:[[:space:]]*)(true|false)/\1${embark}/" \
+		-e "s/(\"random_embark_world\"[[:space:]]*:[[:space:]]*)\"[^\"]*\"/\1\"${ew}\"/" \
+		"$json" 2>/dev/null || true
+	log_msg "df-ai: random_embark=$embark random_embark_world=\"$ew\" ($mode)"
+}
+
+# Start DF (if not already running) in a detached tmux session named $1. df-ai
+# plays autonomously; configure_dfai makes it continue a loaded save or embark a
+# brand-new world, matching pick_save's choice.
 ensure_df_running() {
 	local sess="$1"
 	df_session_running "$sess" && return 0
@@ -84,21 +105,26 @@ ensure_df_running() {
 	if [ "$#" -ge 2 ]; then save="$2"; else save="$(pick_save)"; fi
 	[ -n "$save" ] && load="+load-save $save"
 
+	# Continue the chosen save (don't let df-ai re-embark over it), or generate a
+	# fresh world when starting a new fortress.
+	if [ -n "$save" ]; then configure_dfai continue "$save"; else configure_dfai new; fi
+
 	log_msg "starting DF in tmux session '$sess' ${load:-(new fortress)}"
 	# exec replaces the shell so the pane PID *is* the dfhack/DF process.
 	tmux new-session -d -s "$sess" -x 250 -y 70 \
 		"cd '$DF_HOME' && exec ./dfhack $load"
+	# No status bar — this is a screensaver, so the fortress fills the terminal
+	# with no tmux chrome.
+	tmux set-option -t "$sess" status off >/dev/null 2>&1 || true
 	# The mirrored fortress shares ONE tmux grid across screens. With foot the
 	# render step pads every fortress terminal down to the smallest fortress
-	# output's grid, so all fortress grids are near-identical; window-size=largest
-	# then trims the ±1-cell rounding differences as invisible edge clipping
-	# instead of leaving tmux dot bands (which =smallest produces, since the min
-	# columns and min rows can come from different screens). For terminals that
-	# can't pad, =largest fills the biggest and clips smaller ones, while
-	# =smallest keeps small screens whole with filler dots on bigger ones.
-	local wsize="${MIRROR_SIZE:-largest}"
-	[ "$TERMINAL" = foot ] && wsize=largest
-	tmux set-option -t "$sess" window-size "$wsize" >/dev/null 2>&1 || true
+	# output's grid, so all fortress grids are near-identical (±1-2 cells, since
+	# outputs can differ in scale). window-size=smallest makes the session the
+	# SMALLEST of those grids: no screen is ever larger than the session, so
+	# nothing is clipped/cut off — a screen whose grid is a touch bigger shows a
+	# thin band of filler dots instead (added space, never lost content). Prefer
+	# this over =largest, which fills the biggest grid but cuts off the others.
+	tmux set-option -t "$sess" window-size "${MIRROR_SIZE:-smallest}" >/dev/null 2>&1 || true
 }
 
 # Signal an entire process group (negative PID). DF reparents to init (PPID 1)
@@ -167,7 +193,7 @@ stop_all_df() {
 # Output classification (Wayland; X11 backend overrides this)
 # ---------------------------------------------------------------------------
 
-# Emit "NAME ROLE W H" per active output, applying the df_fishbowl role rules:
+# Emit "NAME ROLE W H" per active output, applying the fishbowl role rules:
 #   * a single output is ALWAYS the fortress (even if portrait);
 #   * otherwise portrait outputs show the log, landscape ones the fortress;
 #   * special case, LOG_ON_SMALLER_HORIZONTAL=1 (default): when there is no
@@ -202,13 +228,17 @@ output_role() {
 	printf '%s\n' "${role:-fortress}"
 }
 
-# Size in (logical) pixels of the SMALLEST fortress output, as "WxH". This is the
-# reference grid every mirrored fortress terminal renders, so the shared tmux
-# session has one consistent size; larger fortress outputs pad around it (the
-# render step computes the padding) to show it centered.
-smallest_fortress_pixels() {
-	assign_roles | awk '$2=="fortress"{a=$3*$4; if(m==""||a<m){m=a;w=$3;h=$4}}
-		END{if(w!="")printf "%dx%d\n",w,h}'
+# The largest (logical-pixel) rectangle that fits inside EVERY fortress output,
+# as "WxH" — the per-axis minimum of their widths and heights. Every mirrored
+# fortress terminal is padded/centered to this, so the shared tmux grid stays
+# consistent even when outputs differ in aspect ratio: a per-axis minimum always
+# fits inside each output, whereas the smallest-area output might be wider or
+# taller than another and not fit.
+fortress_ref_pixels() {
+	assign_roles | awk '$2=="fortress"{
+			if (w == "" || $3 < w) w = $3
+			if (h == "" || $4 < h) h = $4
+		} END { if (w != "") printf "%dx%d\n", w, h }'
 }
 
 # Size in (logical) pixels of a named output as "WxH", or empty if unknown.

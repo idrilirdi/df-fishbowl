@@ -12,12 +12,15 @@
 #   x11     — xsecurelock + embedded X terminal (structured, UNTESTED)
 #
 # Usage: df_fishbowl <command>
-#   lock        Start DF (if needed) and lock the session with the live view.
-#   start-df    Start DF in tmux without locking (for testing / warm-up).
-#   stop        Quicksave and stop all df_fishbowl DF sessions.
-#   classify    Print how each active output is classified (fortress|log).
-#   cleanup     Delete saved fortresses older than SAVE_MAX_AGE_DAYS.
-#   _render     Internal: invoked by the lock backend to draw per-output content.
+#   lock         Start DF (if needed) and lock the session with the live view.
+#   screensaver  Show DF fullscreen with NO lock (non-secure; dismiss with
+#                Ctrl-C). The easiest way to try it out, and an option for
+#                desktops where replacing the native locker isn't wanted.
+#   start        Start DF in tmux without displaying it (for testing / warm-up).
+#   stop         Quicksave and stop all df_fishbowl DF sessions.
+#   classify     Print how each active output is classified (fortress|log).
+#   cleanup      Delete saved fortresses older than SAVE_MAX_AGE_DAYS.
+#   _render      Internal: invoked by the lock backend to draw per-output content.
 set -euo pipefail
 
 SELF="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)/$(basename "$0")"
@@ -51,14 +54,22 @@ BACKEND="$(detect_backend)"
 . "$ROOT/lib/backend-${BACKEND}.sh"
 
 # --- Dispatch --------------------------------------------------------------
-cmd="${1:-lock}"
+cmd="${1:-help}"
 case "$cmd" in
-lock)      backend_lock "${@:2}" ;;
-start-df)  ensure_df_running "$(df_session_name)" ;;
-stop)      stop_all_df ;;
-classify)  classify_outputs ;;
-cleanup)   cleanup_saves ;;
-_render)   backend_render ;;
+help | -h | --help)
+	# Bare invocation prints usage rather than locking — locking must be explicit.
+	sed -n '2,${/^#/!q;p;}' "$SELF" | sed 's/^# \{0,1\}//'
+	;;
+lock)             backend_lock "${@:2}" ;;
+screensaver)
+	if declare -F backend_screensaver >/dev/null; then backend_screensaver
+	else log_msg "screensaver mode is not implemented for the '$BACKEND' backend"; exit 3; fi
+	;;
+start | start-df) ensure_df_running "$(df_session_name)" ;;
+stop)             stop_all_df ;;
+classify)         classify_outputs ;;
+cleanup)          cleanup_saves ;;
+_render)          backend_render ;;
 *)
 	printf 'df_fishbowl: unknown command %q\n' "$cmd" >&2
 	sed -n '2,${/^#/!q;p;}' "$SELF" | sed 's/^# \{0,1\}//' >&2

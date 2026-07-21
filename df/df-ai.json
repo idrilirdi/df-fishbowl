@@ -45,7 +45,7 @@
 	// true or false: should the AI automatically pick an embark location?
 	"random_embark" : true,
 	// the name of the region to embark on, between quotes, or "" to generate a new world.
-	"random_embark_world" : "region1",
+	"random_embark_world" : "",
 	// true or false: should the AI automatically record CMV files while it plays?
 	"record_movie" : false,
 	// 0: pocket, 1: smaller, 2: small, 3: medium, 4: large
