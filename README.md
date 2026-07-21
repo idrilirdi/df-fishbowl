@@ -122,7 +122,7 @@ surface:
 | `SAVE_MAX_AGE_DAYS` | `30` | prune saves older than this |
 | `FORTRESS_MODE` | `single` | `single` = one sim mirrored to all fortress outputs; `multi` = one sim per fortress output |
 | `LOG_ON_SMALLER_HORIZONTAL` | `1` | with 2+ landscape outputs and no portrait one, put the log on the smallest landscape |
-| `MIRROR_SIZE` | `smallest` | shared tmux grid for the mirrored fortress; with `foot` it's padded/centered so `smallest` fills the small screen and centers on bigger ones (see *Multiple displays*) |
+| `MIRROR_SIZE` | `largest` | shared tmux grid for non-`foot` terminals; `foot` pads/centers the fortress and always uses `largest` (see *Multiple displays*) |
 | `SAVE_FLUSH_SECS` | `3` | wait after quicksave before quitting |
 | `STOP_TIMEOUT` | `15` | grace period before SIGKILL on stop |
 | `FISHBOWL_BACKEND` | *(auto)* | force `wayland` or `x11` |
@@ -140,9 +140,11 @@ In `single` mode all fortress outputs mirror one simulation via tmux. A terminal
 fills each output under the lock and can't be pixel-scaled, so the fortresses
 share **one** grid. With the default `foot`, the render step pads every fortress
 terminal down to the smallest fortress output's grid: that screen fills exactly
-and larger screens show the same grid **centered** (padding around it), while the
-shared tmux session stays one consistent size (no top-left "dots"). `MIRROR_SIZE`
-still selects the shared grid for terminals that can't pad. Because
+and larger screens show the same grid **centered** (padding around it). Because
+the per-screen grids can still differ by a cell or two (rounding), the shared
+session uses tmux `window-size=largest`, which trims that as invisible edge
+clipping rather than leaving asymmetric dot bands. `MIRROR_SIZE` selects the
+shared grid only for terminals that can't pad. Because
 differently-sized/aspected screens can't all be *filled* by one text grid, use
 **`FORTRESS_MODE=multi`** for an independent, natively-full fortress on each
 screen (one df-ai simulation per fortress screen — more CPU, but every screen is

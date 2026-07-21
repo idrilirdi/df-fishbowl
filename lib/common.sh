@@ -90,12 +90,15 @@ ensure_df_running() {
 		"cd '$DF_HOME' && exec ./dfhack $load"
 	# The mirrored fortress shares ONE tmux grid across screens. With foot the
 	# render step pads every fortress terminal down to the smallest fortress
-	# output's grid, so MIRROR_SIZE=smallest makes the session match that grid:
-	# the small screen fills exactly and larger ones show it centered. (For
-	# terminals that can't pad, MIRROR_SIZE still picks the trade-off: smallest
-	# keeps small screens whole with filler dots on bigger ones, largest fills
-	# the biggest and clips smaller ones.)
-	tmux set-option -t "$sess" window-size "${MIRROR_SIZE:-smallest}" >/dev/null 2>&1 || true
+	# output's grid, so all fortress grids are near-identical; window-size=largest
+	# then trims the ±1-cell rounding differences as invisible edge clipping
+	# instead of leaving tmux dot bands (which =smallest produces, since the min
+	# columns and min rows can come from different screens). For terminals that
+	# can't pad, =largest fills the biggest and clips smaller ones, while
+	# =smallest keeps small screens whole with filler dots on bigger ones.
+	local wsize="${MIRROR_SIZE:-largest}"
+	[ "$TERMINAL" = foot ] && wsize=largest
+	tmux set-option -t "$sess" window-size "$wsize" >/dev/null 2>&1 || true
 }
 
 # Signal an entire process group (negative PID). DF reparents to init (PPID 1)
