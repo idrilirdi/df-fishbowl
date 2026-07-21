@@ -32,7 +32,7 @@ background:
 | Fortress | `tmux attach` to a detached DF (`PRINT_MODE:TEXT`) | DF + DFHack + df-ai |
 | Log | `tail -F df-ai.log` | df-ai |
 
-`fishbowl lock` starts DF, then runs `swaylock-plugin` once per output;
+`df_fishbowl lock` starts DF, then runs `swaylock-plugin` once per output;
 each instance picks its role from the output's orientation, wraps the right
 terminal with `windowtolayer`, and renders. If a terminal or DF dies, the
 instance is kept alive so swaylock-plugin degrades to a plain password lock
@@ -88,36 +88,36 @@ in and installed by [`install.sh`](install.sh).
 
 ```sh
 ./install.sh          # interactive — asks before each step
-FISHBOWL_YES=1 ./install.sh   # accept every default (non-interactive)
+DF_FISHBOWL_YES=1 ./install.sh   # accept every default (non-interactive)
 ```
 
 It walks through: dependencies · patched swaylock-plugin · windowtolayer ·
 (optional) havoc · downloading DF 0.47.05 + DFHack + df-ai · (optional) the DF
 0.47.05 compatibility fixes · (optional) a square fortress font (unscii) ·
-linking the `fishbowl` CLI and writing a personal config. Skip anything you
+linking the `df_fishbowl` CLI and writing a personal config. Skip anything you
 already have. Ensure `~/.local/bin` is on your `PATH`.
 
 ## Usage
 
 ```sh
-fishbowl lock       # start DF (if needed) + secure lock with the live view
-fishbowl start-df   # start DF in tmux only (then: tmux attach -t "$SESSION")
-fishbowl stop       # quicksave + stop all DF sessions
-fishbowl classify   # print each active output's role (fortress|log)
-fishbowl cleanup    # prune saves older than SAVE_MAX_AGE_DAYS
+df_fishbowl lock       # start DF (if needed) + secure lock with the live view
+df_fishbowl start-df   # start DF in tmux only (then: tmux attach -t "$SESSION")
+df_fishbowl stop       # quicksave + stop all DF sessions
+df_fishbowl classify   # print each active output's role (fortress|log)
+df_fishbowl cleanup    # prune saves older than SAVE_MAX_AGE_DAYS
 ```
 
 ## Configuration
 
-Defaults are in [`config/fishbowl.conf`](config/fishbowl.conf); override them in
-`~/.config/fishbowl/config` (the installer can write one for you). The full
+Defaults are in [`config/df_fishbowl.conf`](config/df_fishbowl.conf); override them in
+`~/.config/df_fishbowl/config` (the installer can write one for you). The full
 surface:
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `DF_HOME` | `~/DwarfFortressFishbowl/df_linux` | extracted DF tree (has `dfhack`/`dfhack-run`); a dedicated dir so it never touches a DF install you play on |
 | `LOG_FILE` | `$DF_HOME/df-ai.log` | df-ai narration log (shown on log outputs) |
-| `SESSION` | `fishbowl` | tmux session name for the running DF |
+| `SESSION` | `df_fishbowl` | tmux session name for the running DF |
 | `TERMINAL` | `foot` | display terminal (see Terminals) |
 | `FORTRESS_FONT` | `unscii` | font for the fortress terminal only, set per-invocation; a square font un-stretches the map (see *Font*). Blank = terminal default |
 | `FORTRESS_FONT_SIZE` | *(empty)* | point size for `FORTRESS_FONT`; empty = terminal default |
@@ -128,7 +128,7 @@ surface:
 | `MIRROR_SIZE` | `largest` | shared tmux grid for non-`foot` terminals; `foot` pads/centers the fortress and always uses `largest` (see *Multiple displays*) |
 | `SAVE_FLUSH_SECS` | `3` | wait after quicksave before quitting |
 | `STOP_TIMEOUT` | `15` | grace period before SIGKILL on stop |
-| `FISHBOWL_BACKEND` | *(auto)* | force `wayland` or `x11` |
+| `DF_FISHBOWL_BACKEND` | *(auto)* | force `wayland` or `x11` |
 
 ### Multiple displays
 
@@ -181,7 +181,7 @@ See [`integration/`](integration/):
 - `integration/lock.sh` — drop at `~/.config/swaylock/lock.sh` so a sway "Lock"
   button / keybind starts fishbowl.
 - `integration/swayidle.conf` — how to point an idle-lock timeout at
-  `fishbowl lock` (with `resume 'fishbowl stop'`), keeping your dim/suspend
+  `df_fishbowl lock` (with `resume 'df_fishbowl stop'`), keeping your dim/suspend
   timeouts.
 
 ## Dwarf Fortress 0.47.05 compatibility notes
@@ -208,7 +208,7 @@ files):
 
 - **Grey lock, no fortress** — the terminal failed to start; swaylock-plugin
   fell back to a plain (still working) password lock. Check
-  `~/.cache/fishbowl-render.log`. Common causes: missing swaylock-plugin patch
+  `~/.cache/df_fishbowl-render.log`. Common causes: missing swaylock-plugin patch
   for your terminal, or DF not running.
 - **Fortress off-centre / dots around it** — with `foot` the fortress is padded
   to a shared grid and centered; if it isn't, you're likely on an old
@@ -228,7 +228,7 @@ Built entirely on other people's work:
 - **havoc** — [ii8](https://github.com/ii8/havoc); **foot** — Daniel Eklöf; **alacritty** — the Alacritty project.
 - **sway** / **wlroots** and the Wayland `ext-session-lock` / `wlr-layer-shell` protocols.
 
-`fishbowl` itself just wires these together.
+`df_fishbowl` itself just wires these together.
 
 ## License
 

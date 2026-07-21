@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# fishbowl — a Dwarf Fortress (df-ai) secure lock-screensaver.
+# df_fishbowl — a Dwarf Fortress (df-ai) secure lock-screensaver.
 #
 # The fortress plays itself (BenLubar df-ai) in a detached tmux session and is
 # displayed, live, on your monitors while the session is securely locked:
@@ -11,10 +11,10 @@
 #   wayland — swaylock-plugin + windowtolayer + a Wayland terminal (tested on Sway)
 #   x11     — xsecurelock + embedded X terminal (structured, UNTESTED)
 #
-# Usage: fishbowl <command>
+# Usage: df_fishbowl <command>
 #   lock        Start DF (if needed) and lock the session with the live view.
 #   start-df    Start DF in tmux without locking (for testing / warm-up).
-#   stop        Quicksave and stop all fishbowl DF sessions.
+#   stop        Quicksave and stop all df_fishbowl DF sessions.
 #   classify    Print how each active output is classified (fortress|log).
 #   cleanup     Delete saved fortresses older than SAVE_MAX_AGE_DAYS.
 #   _render     Internal: invoked by the lock backend to draw per-output content.
@@ -25,8 +25,8 @@ ROOT="$(dirname "$(dirname "$SELF")")"   # .../screensaver
 
 # --- Load configuration (shipped default, then user override) --------------
 # shellcheck source=/dev/null
-. "$ROOT/config/fishbowl.conf"
-USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/fishbowl/config"
+. "$ROOT/config/df_fishbowl.conf"
+USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/df_fishbowl/config"
 # shellcheck source=/dev/null
 [ -f "$USER_CONF" ] && . "$USER_CONF"
 
@@ -36,8 +36,8 @@ USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/fishbowl/config"
 
 # --- Select and load the backend -------------------------------------------
 detect_backend() {
-	if [ -n "${FISHBOWL_BACKEND:-}" ]; then
-		printf '%s\n' "$FISHBOWL_BACKEND"
+	if [ -n "${DF_FISHBOWL_BACKEND:-}" ]; then
+		printf '%s\n' "$DF_FISHBOWL_BACKEND"
 	elif [ -n "${WAYLAND_DISPLAY:-}" ] || [ "${XDG_SESSION_TYPE:-}" = wayland ]; then
 		printf 'wayland\n'
 	elif [ -n "${DISPLAY:-}" ]; then
@@ -60,7 +60,7 @@ classify)  classify_outputs ;;
 cleanup)   cleanup_saves ;;
 _render)   backend_render ;;
 *)
-	printf 'fishbowl: unknown command %q\n' "$cmd" >&2
+	printf 'df_fishbowl: unknown command %q\n' "$cmd" >&2
 	sed -n '2,${/^#/!q;p;}' "$SELF" | sed 's/^# \{0,1\}//' >&2
 	exit 2
 	;;

@@ -1,11 +1,11 @@
 # shellcheck shell=bash
-# X11 backend for fishbowl.  ***STRUCTURED BUT UNTESTED*** — written on a
+# X11 backend for df_fishbowl.  ***STRUCTURED BUT UNTESTED*** — written on a
 # Wayland-only host; validate on a real X11 session before relying on it.
 #
 # The secure-lock-with-live-content analog of swaylock-plugin on X11 is
 # `xsecurelock`: it locks the session and spawns a saver executable per monitor,
 # handing it a window id in $XSCREENSAVER_WINDOW sized to that monitor. Our saver
-# (`fishbowl _render`) embeds a terminal into that window with the same
+# (`df_fishbowl _render`) embeds a terminal into that window with the same
 # fortress/log split, decided from the window's geometry.
 #
 # Requires: xsecurelock, an X terminal that can embed into a foreign window

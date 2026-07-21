@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Wayland / Sway backend for fishbowl.
+# Wayland / Sway backend for df_fishbowl.
 #
 # Secure locking with live content is provided by swaylock-plugin, an
 # ext-session-lock-v1 client that composites a per-output background command.
@@ -74,7 +74,7 @@ backend_render() {
 	# Tolerate any shell error/unset var — never let a scripting slip kill the lock.
 	set +e +u
 
-	local rlog="${DF_RENDER_LOG:-$HOME/.cache/fishbowl-render.log}"
+	local rlog="${DF_RENDER_LOG:-$HOME/.cache/df_fishbowl-render.log}"
 	mkdir -p "$(dirname "$rlog")" 2>/dev/null
 	{
 		echo "==== _render(each) $(date '+%F %T') pid=$$ ===="

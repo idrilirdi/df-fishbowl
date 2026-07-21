@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #
-# Apply the Dwarf Fortress settings fishbowl needs, editing YOUR OWN DF install
-# in place. fishbowl deliberately does not redistribute Bay 12's (init.txt /
+# Apply the Dwarf Fortress settings df_fishbowl needs, editing YOUR OWN DF install
+# in place. df_fishbowl deliberately does not redistribute Bay 12's (init.txt /
 # d_init.txt) or DFHack's (dfhack.init) files — it only adjusts the copies you
 # already have. The one file it does ship is df-ai's config (df/df-ai.json).
 #
@@ -35,7 +35,7 @@ echo "init.txt: PRINT_MODE:TEXT, SOUND:NO, INTRO:NO"
 if [ -f "$dfhack_init" ] && grep -qE '^[[:space:]]*enable[[:space:]]+df-ai' "$dfhack_init"; then
 	echo "dfhack.init: df-ai already enabled"
 else
-	printf '\n# fishbowl: let df-ai play the fortress autonomously\nenable df-ai\n' >>"$dfhack_init"
+	printf '\n# df_fishbowl: let df-ai play the fortress autonomously\nenable df-ai\n' >>"$dfhack_init"
 	echo "dfhack.init: added 'enable df-ai'"
 fi
 

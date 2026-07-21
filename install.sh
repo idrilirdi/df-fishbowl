@@ -5,7 +5,7 @@
 # It walks through the pieces and asks before each one, so you can install only
 # what you need on your machine. Nothing here is mandatory except the CLI link.
 #
-# Non-interactive use: set FISHBOWL_YES=1 to accept every default.
+# Non-interactive use: set DF_FISHBOWL_YES=1 to accept every default.
 # Package installs assume Debian/Ubuntu (apt); adapt the package step for other
 # distros — every other step is distro-agnostic.
 set -euo pipefail
@@ -13,8 +13,8 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 PREFIX="${PREFIX:-$HOME/.local}"
 BINDIR="$PREFIX/bin"
-SRCDIR="${FISHBOWL_SRC:-$HOME/.cache/fishbowl/src}"
-YES="${FISHBOWL_YES:-0}"
+SRCDIR="${DF_FISHBOWL_SRC:-$HOME/.cache/df_fishbowl/src}"
+YES="${DF_FISHBOWL_YES:-0}"
 
 # --- pretty + prompts --------------------------------------------------------
 c() { printf '\033[1;36m%s\033[0m\n' "$*"; }
@@ -96,11 +96,11 @@ step_swaylock_plugin() {
 		cd "$SRCDIR/swaylock-plugin"
 		git fetch --tags -q || true
 		git checkout -q "$(git tag | grep -E '^(v)?1\.8\.7$' | head -1 || echo main)"
-		git checkout -q -B fishbowl-build
-		# Apply the fishbowl patches unless upstream already has them.
+		git checkout -q -B df_fishbowl-build
+		# Apply the df_fishbowl patches unless upstream already has them.
 		if git apply --check "$REPO"/patches/*.patch 2>/dev/null; then
 			git am "$REPO"/patches/*.patch
-			echo "Applied fishbowl patches."
+			echo "Applied df_fishbowl patches."
 		else
 			warn "Patches did not apply cleanly (already upstream, or version drift?) — building as-is."
 		fi
@@ -133,7 +133,7 @@ step_havoc() {
 	[ -d "$SRCDIR/havoc" ] || git clone --depth 1 https://github.com/ii8/havoc.git "$SRCDIR/havoc"
 	( cd "$SRCDIR/havoc" && make )
 	install -m755 "$SRCDIR/havoc/havoc" "$BINDIR/havoc"
-	warn "To use it, set TERMINAL=havoc in your fishbowl config."
+	warn "To use it, set TERMINAL=havoc in your df_fishbowl config."
 }
 
 step_download_df() {
@@ -159,7 +159,7 @@ step_df_fixes() {
 	[ -d "$DF_HOME" ] || return 0
 	ask "Apply Dwarf Fortress 0.47.05 compatibility fixes (PRINT_MODE:TEXT + df-ai + ncurses symlinks)? See README." Y || return 0
 	# 1. Edit your own DF init/dfhack.init in place + install df-ai's config.
-	#    (fishbowl does not redistribute Bay 12's or DFHack's files.)
+	#    (df_fishbowl does not redistribute Bay 12's or DFHack's files.)
 	DF_HOME="$DF_HOME" "$REPO/df/apply-df-settings.sh" "$DF_HOME"
 	# 2. ncurses compat: DF dlopens libncursesw.so / .so.5, absent on modern
 	#    distros; symlink to .so.6 inside DF's own LD_LIBRARY_PATH (hack/libs).
@@ -191,9 +191,9 @@ step_font() {
 	local dir="$HOME/.local/share/fonts" url="http://viznut.fi/unscii/unscii-8.ttf"
 	mkdir -p "$dir"
 	if command -v curl >/dev/null 2>&1; then
-		curl -fsSLo "$dir/unscii-8.ttf" "$url" || { warn "Download failed; see FORTRESS_FONT in config/fishbowl.conf for a manual install."; return 0; }
+		curl -fsSLo "$dir/unscii-8.ttf" "$url" || { warn "Download failed; see FORTRESS_FONT in config/df_fishbowl.conf for a manual install."; return 0; }
 	else
-		wget -qO "$dir/unscii-8.ttf" "$url" || { warn "Download failed; see FORTRESS_FONT in config/fishbowl.conf."; return 0; }
+		wget -qO "$dir/unscii-8.ttf" "$url" || { warn "Download failed; see FORTRESS_FONT in config/df_fishbowl.conf."; return 0; }
 	fi
 	fc-cache -f "$dir" >/dev/null 2>&1 || fc-cache -f >/dev/null 2>&1 || true
 	if fc-list 2>/dev/null | grep -qi 'unscii'; then
@@ -205,24 +205,24 @@ step_font() {
 
 step_config_and_link() {
 	mkdir -p "$BINDIR"
-	ln -sf "$REPO/bin/fishbowl" "$BINDIR/fishbowl"
-	c "Linked $BINDIR/fishbowl"
-	if ask "Write a personal config to ~/.config/fishbowl/config?" Y; then
-		mkdir -p "$HOME/.config/fishbowl"
+	ln -sf "$REPO/bin/df_fishbowl" "$BINDIR/df_fishbowl"
+	c "Linked $BINDIR/df_fishbowl"
+	if ask "Write a personal config to ~/.config/df_fishbowl/config?" Y; then
+		mkdir -p "$HOME/.config/df_fishbowl"
 		local df term font
 		df="$(askval 'Dwarf Fortress install dir (DF_HOME)' "$DF_HOME")"
 		term="$(askval 'Terminal to display the fortress (TERMINAL)' "$([ "$ENV" = wayland ] && echo foot || echo xterm)")"
 		# Default the fortress font to whatever step_font installed (blank = the
 		# terminal's own font, i.e. no un-stretching).
 		font="$(askval 'Font for the fortress terminal (FORTRESS_FONT, blank = terminal default)' "$FONT_FAMILY")"
-		cat >"$HOME/.config/fishbowl/config" <<EOF
-# Personal fishbowl config (overrides config/fishbowl.conf). See that file for
+		cat >"$HOME/.config/df_fishbowl/config" <<EOF
+# Personal df_fishbowl config (overrides config/df_fishbowl.conf). See that file for
 # all options and the README for details.
 DF_HOME="$df"
 TERMINAL="$term"
 FORTRESS_FONT="$font"
 EOF
-		echo "Wrote ~/.config/fishbowl/config"
+		echo "Wrote ~/.config/df_fishbowl/config"
 	fi
 }
 
@@ -241,9 +241,9 @@ main() {
 	cat <<EOF
 Next:
   * Ensure $BINDIR is on PATH.
-  * Try it:   fishbowl classify      # shows each output's role (fortress|log)
-              fishbowl start-df       # launch DF in tmux; tmux attach -t \$SESSION
-              fishbowl lock           # secure lock with the live fortress
+  * Try it:   df_fishbowl classify      # shows each output's role (fortress|log)
+              df_fishbowl start-df       # launch DF in tmux; tmux attach -t \$SESSION
+              df_fishbowl lock           # secure lock with the live fortress
   * Wire it into swayidle / your bar — see README.md and integration/.
 EOF
 }

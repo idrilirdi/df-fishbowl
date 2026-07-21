@@ -1,10 +1,10 @@
 # shellcheck shell=bash
-# Backend-agnostic helpers for fishbowl.
-# Sourced by bin/fishbowl after the config has been loaded, so it may
+# Backend-agnostic helpers for df_fishbowl.
+# Sourced by bin/df_fishbowl after the config has been loaded, so it may
 # rely on: DF_HOME LOG_FILE SESSION TERMINAL NEW_FORT_CHANCE SAVE_MAX_AGE_DAYS
 #          FORTRESS_MODE SAVE_FLUSH_SECS STOP_TIMEOUT
 
-log_msg() { printf '[fishbowl] %s\n' "$*" >&2; }
+log_msg() { printf '[df_fishbowl] %s\n' "$*" >&2; }
 
 # ---------------------------------------------------------------------------
 # Save management
@@ -150,7 +150,7 @@ stop_df_session() {
 	tmux kill-session -t "$sess" 2>/dev/null || true
 }
 
-# Stop every fishbowl DF session (shared + any per-output ones) and sweep
+# Stop every df_fishbowl DF session (shared + any per-output ones) and sweep
 # stragglers. Backend-agnostic teardown.
 stop_all_df() {
 	local s
@@ -167,7 +167,7 @@ stop_all_df() {
 # Output classification (Wayland; X11 backend overrides this)
 # ---------------------------------------------------------------------------
 
-# Emit "NAME ROLE W H" per active output, applying the fishbowl role rules:
+# Emit "NAME ROLE W H" per active output, applying the df_fishbowl role rules:
 #   * a single output is ALWAYS the fortress (even if portrait);
 #   * otherwise portrait outputs show the log, landscape ones the fortress;
 #   * special case, LOG_ON_SMALLER_HORIZONTAL=1 (default): when there is no
