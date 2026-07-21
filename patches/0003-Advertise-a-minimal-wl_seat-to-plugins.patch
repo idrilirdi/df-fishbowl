@@ -1,0 +1,131 @@
+From b8acdeb1f4fe5429cd24ede62421a5da3a20ecdb Mon Sep 17 00:00:00 2001
+From: Idril Geer <idril.geer@futurail.com>
+Date: Tue, 21 Jul 2026 14:24:52 +0200
+Subject: [PATCH 3/3] Advertise a minimal wl_seat to plugins
+
+Some terminals (e.g. foot) refuse to start when no wl_seat is present
+("no seats available"), even when run as a background that will never
+receive input.
+
+Advertise a wl_seat that reports no capabilities; its pointer, keyboard
+and touch accessors return inert objects. This is separate from the real
+seat swaylock uses to read the unlock password, so plugins can start and
+draw while all input still goes to the locker.
+---
+ forward.c          | 65 ++++++++++++++++++++++++++++++++++++++++++++++
+ include/swaylock.h |  2 ++
+ main.c             |  2 ++
+ 3 files changed, 69 insertions(+)
+
+diff --git a/forward.c b/forward.c
+index 95f688d..96e86f1 100644
+--- a/forward.c
++++ b/forward.c
+@@ -1302,6 +1302,71 @@ void bind_wl_subcompositor(struct wl_client *client, void *data,
+ 	wl_resource_set_implementation(resource, &subcompositor_impl, NULL, NULL);
+ }
+ 
++/* Minimal wl_seat. Some terminals (e.g. foot) refuse to start when no seat is
++ * advertised ("no seats available"). Plugins are wallpapers and receive no
++ * input while the session is locked, so this seat advertises no capabilities
++ * and its device accessors return inert objects. This is independent of the
++ * real seat swaylock uses to read the unlock password. */
++static void nested_pointer_set_cursor(struct wl_client *client,
++		struct wl_resource *resource, uint32_t serial,
++		struct wl_resource *surface, int32_t hx, int32_t hy) { }
++static void nested_pointer_release(struct wl_client *client,
++		struct wl_resource *resource) { wl_resource_destroy(resource); }
++static const struct wl_pointer_interface pointer_impl = {
++	.set_cursor = nested_pointer_set_cursor,
++	.release = nested_pointer_release,
++};
++static void nested_keyboard_release(struct wl_client *client,
++		struct wl_resource *resource) { wl_resource_destroy(resource); }
++static const struct wl_keyboard_interface keyboard_impl = {
++	.release = nested_keyboard_release,
++};
++static void nested_touch_release(struct wl_client *client,
++		struct wl_resource *resource) { wl_resource_destroy(resource); }
++static const struct wl_touch_interface touch_impl = {
++	.release = nested_touch_release,
++};
++static void nested_seat_get_pointer(struct wl_client *client,
++		struct wl_resource *resource, uint32_t id) {
++	struct wl_resource *r = wl_resource_create(client, &wl_pointer_interface,
++		wl_resource_get_version(resource), id);
++	if (r) wl_resource_set_implementation(r, &pointer_impl, NULL, NULL);
++}
++static void nested_seat_get_keyboard(struct wl_client *client,
++		struct wl_resource *resource, uint32_t id) {
++	struct wl_resource *r = wl_resource_create(client, &wl_keyboard_interface,
++		wl_resource_get_version(resource), id);
++	if (r) wl_resource_set_implementation(r, &keyboard_impl, NULL, NULL);
++}
++static void nested_seat_get_touch(struct wl_client *client,
++		struct wl_resource *resource, uint32_t id) {
++	struct wl_resource *r = wl_resource_create(client, &wl_touch_interface,
++		wl_resource_get_version(resource), id);
++	if (r) wl_resource_set_implementation(r, &touch_impl, NULL, NULL);
++}
++static void nested_seat_release(struct wl_client *client,
++		struct wl_resource *resource) { wl_resource_destroy(resource); }
++static const struct wl_seat_interface seat_impl = {
++	.get_pointer = nested_seat_get_pointer,
++	.get_keyboard = nested_seat_get_keyboard,
++	.get_touch = nested_seat_get_touch,
++	.release = nested_seat_release,
++};
++void bind_wl_seat(struct wl_client *client, void *data,
++		uint32_t version, uint32_t id) {
++	struct wl_resource *resource =
++		wl_resource_create(client, &wl_seat_interface, version, id);
++	if (resource == NULL) {
++		wl_client_post_no_memory(client);
++		return;
++	}
++	wl_resource_set_implementation(resource, &seat_impl, NULL, NULL);
++	wl_seat_send_capabilities(resource, 0);
++	if (version >= 2) {
++		wl_seat_send_name(resource, "seat0");
++	}
++}
++
+ static void fractional_scale_handle_resource_destroy(struct wl_resource *resource) {
+ 	assert(wl_resource_instance_of(resource, &wp_fractional_scale_v1_interface, &fractional_scale_impl));
+ 	struct forward_surface *fwd_surface = wl_resource_get_user_data(resource);
+diff --git a/include/swaylock.h b/include/swaylock.h
+index 3002df5..0027505 100644
+--- a/include/swaylock.h
++++ b/include/swaylock.h
+@@ -119,6 +119,7 @@ struct swaylock_bg_server {
+ 	struct wl_global *wlr_layer_shell;
+ 	struct wl_global *compositor;
+ 	struct wl_global *subcompositor;
++	struct wl_global *seat;
+ 	struct wl_global *shm;
+ 	struct wl_global *xdg_output_manager;
+ 	struct wl_global *zwp_linux_dmabuf;
+@@ -555,6 +556,7 @@ struct swaylock_surface {
+  */
+ void bind_wl_compositor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
+ void bind_wl_subcompositor(struct wl_client *client, void *data, uint32_t version, uint32_t id);
++void bind_wl_seat(struct wl_client *client, void *data, uint32_t version, uint32_t id);
+ void bind_wl_shm(struct wl_client *client, void *data, uint32_t version, uint32_t id);
+ void bind_linux_dmabuf(struct wl_client *client, void *data, uint32_t version, uint32_t id);
+ void bind_drm(struct wl_client *client, void *data, uint32_t version, uint32_t id);
+diff --git a/main.c b/main.c
+index ddc8d9f..7d795cb 100644
+--- a/main.c
++++ b/main.c
+@@ -2495,6 +2495,8 @@ int main(int argc, char **argv) {
+ 		&wl_compositor_interface, 4, &state.forward, bind_wl_compositor);
+ 	state.server.subcompositor = wl_global_create(state.server.display,
+ 		&wl_subcompositor_interface, 1, &state.forward, bind_wl_subcompositor);
++	state.server.seat = wl_global_create(state.server.display,
++		&wl_seat_interface, 7, &state.forward, bind_wl_seat);
+ 	state.server.shm = wl_global_create(state.server.display,
+ 		&wl_shm_interface, 1, &state.forward, bind_wl_shm);
+ 	if (state.forward.drm) {
+-- 
+2.43.0
+

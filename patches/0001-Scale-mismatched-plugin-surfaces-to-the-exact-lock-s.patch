@@ -1,0 +1,57 @@
+From 178f3b98c8e45272f09f3e3968f1be98493dec62 Mon Sep 17 00:00:00 2001
+From: Idril Geer <idril.geer@futurail.com>
+Date: Tue, 21 Jul 2026 13:44:17 +0200
+Subject: [PATCH] Scale mismatched plugin surfaces to the exact lock size
+
+ext-session-lock requires every lock surface to commit at exactly the
+last acknowledged configure size. Some plugins cannot produce an
+arbitrary pixel size: terminals run via windowtolayer round their surface
+down to a whole character-cell grid, so a 1876x1021 output ends up
+committed as 1870x1008.
+
+Such a commit was previously rejected with a protocol error, leaving the
+locker with no background (it falls back to client-less mode). Instead,
+when the committed size differs from the acknowledged size, use the
+background surface's own viewport to scale it to exactly the acknowledged
+dimensions. Fall back to the previous error only when no wp_viewporter is
+available.
+
+This lets terminals and other non-pixel-exact programs be used as lock
+backgrounds via windowtolayer.
+---
+ forward.c | 19 +++++++++++++++----
+ 1 file changed, 15 insertions(+), 4 deletions(-)
+
+diff --git a/forward.c b/forward.c
+index c10cf59..967e768 100644
+--- a/forward.c
++++ b/forward.c
+@@ -418,10 +418,21 @@ static void nested_surface_commit(struct wl_client *client,
+ 		}
+ 	}
+ 	if (output_width != surface->last_acked_width || output_height != surface->last_acked_height) {
+-		swaylock_log(LOG_ERROR, "Wallpaper program committed surface at size %d x %d, which does not exactly match last acknowledged W x H = %d x %d",
+-			output_width, output_height, surface->last_acked_width, surface->last_acked_height);
+-		wl_resource_post_error(resource, 1000, "The wallpaper program should exactly match the configure width/height");
+-		return;
++		/* The plugin committed a size that does not match the acked configure
++		 * (e.g. a terminal that rounds to whole character cells). Override the
++		 * background surface's viewport destination so the committed content is
++		 * scaled to exactly the acked size, rather than rejecting the commit
++		 * (which would leave the locker with no plugin). The viewport source,
++		 * if any, was already set from the plugin's own viewport above. */
++		if (sw_surf->viewport) {
++			wp_viewport_set_destination(sw_surf->viewport,
++				surface->last_acked_width, surface->last_acked_height);
++		} else {
++			swaylock_log(LOG_ERROR, "Wallpaper program committed surface at size %d x %d, which does not exactly match last acknowledged W x H = %d x %d, and no wp_viewporter is available to rescale it",
++				output_width, output_height, surface->last_acked_width, surface->last_acked_height);
++			wl_resource_post_error(resource, 1000, "The wallpaper program should exactly match the configure width/height");
++			return;
++		}
+ 	}
+ 
+ 	// TODO: verify that on scale or attachment change, the resulting size exactly matches the output
+-- 
+2.43.0
+

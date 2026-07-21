@@ -1,0 +1,3 @@
+# nothing to build in-tree; patches/ and df/ templates are tracked
+*.log
+*.png
