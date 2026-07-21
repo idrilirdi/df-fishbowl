@@ -125,9 +125,28 @@ backend_render() {
 		fi
 	fi
 
+	# Per-invocation font for the FORTRESS terminal only (never the user's global
+	# config, and not the log — prose reads better in a normal font). A square
+	# font (e.g. unscii) renders DF's CP437 map with correct proportions; a normal
+	# 1:2 monospace looks vertically stretched. foot/kitty take it as -o; other
+	# terminals are left alone. Missing glyphs fall back to the system default.
+	local -a fontopts=()
+	if [ "$role" != log ] && [ -n "$FORTRESS_FONT" ]; then
+		case "$TERMINAL" in
+		foot)
+			fontopts=(-o "font=${FORTRESS_FONT}${FORTRESS_FONT_SIZE:+:size=$FORTRESS_FONT_SIZE}")
+			;;
+		kitty)
+			fontopts=(-o "font_family=$FORTRESS_FONT")
+			[ -n "$FORTRESS_FONT_SIZE" ] && fontopts+=(-o "font_size=$FORTRESS_FONT_SIZE")
+			;;
+		esac
+	fi
+
 	case "$TERMINAL" in
-	havoc | kitty) term=("$TERMINAL" sh -c "$inner") ;;
-	foot) term=("$TERMINAL" "${footopts[@]}" -e sh -c "$inner") ;;
+	havoc) term=("$TERMINAL" sh -c "$inner") ;;
+	kitty) term=("$TERMINAL" "${fontopts[@]}" sh -c "$inner") ;;
+	foot) term=("$TERMINAL" "${footopts[@]}" "${fontopts[@]}" -e sh -c "$inner") ;;
 	*) term=("$TERMINAL" -e sh -c "$inner") ;;
 	esac
 

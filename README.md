@@ -68,7 +68,7 @@ Pick with `TERMINAL=` in your config. On the swaylock-plugin backend:
 | **havoc** | ✅ | patch **1** only (single `wl_shm` surface — no subcompositor/seat) |
 | **foot** (default) | ✅ | patches **1 + 2 + 3** |
 | **alacritty** | ✅ | patches **1 + 2** |
-| **kitty** | ❌ | GL/GLFW fails to init under the nested compositor |
+| **kitty** | ☠️ | **dangerous — do not use.** Its GL/EGL init crashes swaylock-plugin's compositor, which abandons the `ext-session-lock` (sway shows its red recovery screen). |
 
 Use **havoc** if you'd rather run an unpatched swaylock-plugin. Use **foot** for
 the nicest text — and for the mirrored-fortress centering (see *Multiple
@@ -93,8 +93,9 @@ FISHBOWL_YES=1 ./install.sh   # accept every default (non-interactive)
 
 It walks through: dependencies · patched swaylock-plugin · windowtolayer ·
 (optional) havoc · downloading DF 0.47.05 + DFHack + df-ai · (optional) the DF
-0.47.05 compatibility fixes · linking the `fishbowl` CLI and writing a personal
-config. Skip anything you already have. Ensure `~/.local/bin` is on your `PATH`.
+0.47.05 compatibility fixes · (optional) a square fortress font (unscii) ·
+linking the `fishbowl` CLI and writing a personal config. Skip anything you
+already have. Ensure `~/.local/bin` is on your `PATH`.
 
 ## Usage
 
@@ -118,6 +119,8 @@ surface:
 | `LOG_FILE` | `$DF_HOME/df-ai.log` | df-ai narration log (shown on log outputs) |
 | `SESSION` | `fishbowl` | tmux session name for the running DF |
 | `TERMINAL` | `foot` | display terminal (see Terminals) |
+| `FORTRESS_FONT` | `unscii` | font for the fortress terminal only, set per-invocation; a square font un-stretches the map (see *Font*). Blank = terminal default |
+| `FORTRESS_FONT_SIZE` | *(empty)* | point size for `FORTRESS_FONT`; empty = terminal default |
 | `NEW_FORT_CHANCE` | `10` | % chance to embark a new fort vs. load a save |
 | `SAVE_MAX_AGE_DAYS` | `30` | prune saves older than this |
 | `FORTRESS_MODE` | `single` | `single` = one sim mirrored to all fortress outputs; `multi` = one sim per fortress output |
@@ -149,6 +152,27 @@ differently-sized/aspected screens can't all be *filled* by one text grid, use
 **`FORTRESS_MODE=multi`** for an independent, natively-full fortress on each
 screen (one df-ai simulation per fortress screen — more CPU, but every screen is
 crisp and complete).
+
+### Font (un-stretching the map)
+
+In `PRINT_MODE:TEXT` DF has **no tileset** — it draws with the *terminal's font*.
+A normal monospace cell is about 1:2 (twice as tall as wide), but DF's world
+assumes **square** tiles, so the map looks vertically stretched. The fix is a
+square font: set `FORTRESS_FONT` to one and fishbowl passes it to the fortress
+terminal **per-invocation** (your global terminal config and the log are left
+alone). [`unscii`](http://viznut.fi/unscii/) (unscii-8 — square, public domain,
+CP437 + semigraphics) is an excellent fit and is what `install.sh` offers to
+fetch into `~/.local/share/fonts`; install it by hand with:
+
+```sh
+mkdir -p ~/.local/share/fonts &&
+curl -fsSLo ~/.local/share/fonts/unscii-8.ttf http://viznut.fi/unscii/unscii-8.ttf &&
+fc-cache -f
+```
+
+Only `foot` applies `FORTRESS_FONT` safely. Any glyphs the font lacks fall back
+to the system default. (`foot` has no cell-height control, so a naturally square
+font is the only clean fix there — which is exactly what unscii is.)
 
 ## Integration (idle / bar / keybind)
 

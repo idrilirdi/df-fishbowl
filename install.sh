@@ -175,20 +175,52 @@ step_df_fixes() {
 	warn "DF also needs SDL 1.2 runtime libs (see README): sudo apt install libsdl1.2debian libsdl-image1.2 libsdl-ttf2.0-0"
 }
 
+# A square font so DF's TEXT-mode CP437 map isn't vertically stretched. unscii-8
+# is square, public domain, and covers CP437 + semigraphics. Installed per-user
+# (no sudo); FONT_FAMILY is set on success so the written config points at it.
+FONT_FAMILY=""
+step_font() {
+	[ "$ENV" = wayland ] || return 0
+	echo "DF runs in TEXT mode and draws with the terminal font. A SQUARE font"
+	echo "renders its map with correct proportions; a normal monospace looks"
+	echo "vertically stretched. unscii-8 (square, public domain) fixes that."
+	ask "Install the unscii font into ~/.local/share/fonts (per-user, no sudo)?" Y || return 0
+	if fc-list 2>/dev/null | grep -qi 'unscii'; then
+		echo "unscii already installed."; FONT_FAMILY="unscii"; return 0
+	fi
+	local dir="$HOME/.local/share/fonts" url="http://viznut.fi/unscii/unscii-8.ttf"
+	mkdir -p "$dir"
+	if command -v curl >/dev/null 2>&1; then
+		curl -fsSLo "$dir/unscii-8.ttf" "$url" || { warn "Download failed; see FORTRESS_FONT in config/fishbowl.conf for a manual install."; return 0; }
+	else
+		wget -qO "$dir/unscii-8.ttf" "$url" || { warn "Download failed; see FORTRESS_FONT in config/fishbowl.conf."; return 0; }
+	fi
+	fc-cache -f "$dir" >/dev/null 2>&1 || fc-cache -f >/dev/null 2>&1 || true
+	if fc-list 2>/dev/null | grep -qi 'unscii'; then
+		FONT_FAMILY="unscii"; c "Installed unscii → ~/.local/share/fonts/unscii-8.ttf"
+	else
+		warn "unscii downloaded but fontconfig can't see it yet; check ~/.local/share/fonts."
+	fi
+}
+
 step_config_and_link() {
 	mkdir -p "$BINDIR"
 	ln -sf "$REPO/bin/fishbowl" "$BINDIR/fishbowl"
 	c "Linked $BINDIR/fishbowl"
 	if ask "Write a personal config to ~/.config/fishbowl/config?" Y; then
 		mkdir -p "$HOME/.config/fishbowl"
-		local df term
+		local df term font
 		df="$(askval 'Dwarf Fortress install dir (DF_HOME)' "$DF_HOME")"
 		term="$(askval 'Terminal to display the fortress (TERMINAL)' "$([ "$ENV" = wayland ] && echo foot || echo xterm)")"
+		# Default the fortress font to whatever step_font installed (blank = the
+		# terminal's own font, i.e. no un-stretching).
+		font="$(askval 'Font for the fortress terminal (FORTRESS_FONT, blank = terminal default)' "$FONT_FAMILY")"
 		cat >"$HOME/.config/fishbowl/config" <<EOF
 # Personal fishbowl config (overrides config/fishbowl.conf). See that file for
 # all options and the README for details.
 DF_HOME="$df"
 TERMINAL="$term"
+FORTRESS_FONT="$font"
 EOF
 		echo "Wrote ~/.config/fishbowl/config"
 	fi
@@ -202,6 +234,7 @@ main() {
 	step_havoc
 	step_download_df
 	step_df_fixes
+	step_font
 	step_config_and_link
 	echo
 	c "Done."
