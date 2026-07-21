@@ -2,7 +2,7 @@
 # Backend-agnostic helpers for fishbowl.
 # Sourced by bin/fishbowl after the config has been loaded, so it may
 # rely on: DF_HOME LOG_FILE SESSION TERMINAL NEW_FORT_CHANCE SAVE_MAX_AGE_DAYS
-#          MIRROR_SIZE SAVE_FLUSH_SECS STOP_TIMEOUT
+#          FORTRESS_MODE SAVE_FLUSH_SECS STOP_TIMEOUT
 
 log_msg() { printf '[fishbowl] %s\n' "$*" >&2; }
 
@@ -14,20 +14,23 @@ log_msg() { printf '[fishbowl] %s\n' "$*" >&2; }
 # fortress. A new fortress is requested with probability NEW_FORT_CHANCE% (and
 # also whenever no existing save is available).
 pick_save() {
+	local exclude="${1:-}"   # anchored regex of save names NOT to pick (multi)
 	local roll
 	roll=$(shuf -i 1-100 -n1)
 	if [ "$roll" -le "$NEW_FORT_CHANCE" ]; then
 		log_msg "rolled $roll <= ${NEW_FORT_CHANCE}%: generating a NEW fortress"
 		return 0
 	fi
-	local save
-	save=$(find "$DF_HOME/data/save" -mindepth 1 -maxdepth 1 -type d \
-		! -name current -printf '%f\n' 2>/dev/null | shuf -n1)
+	local saves save
+	saves=$(find "$DF_HOME/data/save" -mindepth 1 -maxdepth 1 -type d \
+		! -name current -printf '%f\n' 2>/dev/null)
+	[ -n "$exclude" ] && saves=$(printf '%s\n' "$saves" | grep -vxE "$exclude" || true)
+	save=$(printf '%s\n' "$saves" | grep -v '^$' | shuf -n1)
 	if [ -n "$save" ]; then
 		log_msg "loading existing save: $save"
 		printf '%s\n' "$save"
 	else
-		log_msg "no existing saves found: generating a NEW fortress"
+		log_msg "no (unclaimed) save available: generating a NEW fortress"
 	fi
 }
 
@@ -49,9 +52,14 @@ cleanup_saves() {
 # DF process lifecycle (tmux)
 # ---------------------------------------------------------------------------
 
-# tmux session name holding the running DF (the shared, mirrored session).
+# tmux session name for a given output ("" => the shared/default session).
+# single mode always uses $SESSION; multi mode uses a per-output session.
 df_session_name() {
-	printf '%s\n' "$SESSION"
+	if [ "$FORTRESS_MODE" = multi ] && [ -n "${1:-}" ]; then
+		printf '%s_%s\n' "$SESSION" "$1"
+	else
+		printf '%s\n' "$SESSION"
+	fi
 }
 
 df_session_running() { tmux has-session -t "$1" 2>/dev/null; }
@@ -69,8 +77,11 @@ ensure_df_running() {
 	}
 
 	cleanup_saves
+	# $2 (if passed, even empty) is an explicit save: the caller has already
+	# chosen it (multi mode, to keep each fortress distinct). Otherwise pick one
+	# here (single mode). An empty save means "new fortress".
 	local save load=""
-	save=$(pick_save)
+	if [ "$#" -ge 2 ]; then save="$2"; else save="$(pick_save)"; fi
 	[ -n "$save" ] && load="+load-save $save"
 
 	log_msg "starting DF in tmux session '$sess' ${load:-(new fortress)}"
@@ -136,9 +147,14 @@ stop_df_session() {
 	tmux kill-session -t "$sess" 2>/dev/null || true
 }
 
-# Stop the fishbowl DF session and sweep any stragglers. Backend-agnostic teardown.
+# Stop every fishbowl DF session (shared + any per-output ones) and sweep
+# stragglers. Backend-agnostic teardown.
 stop_all_df() {
-	stop_df_session "$SESSION"
+	local s
+	for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null \
+		| grep -E "^${SESSION}(_|$)" || true); do
+		stop_df_session "$s"
+	done
 	# Final safety sweep by binary name (cmdline is the relative ./libs/... path,
 	# so an absolute-path match would miss it).
 	pkill -9 -f 'libs/Dwarf_Fortress' 2>/dev/null || true

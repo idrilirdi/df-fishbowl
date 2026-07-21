@@ -11,11 +11,28 @@
 # Requires: swaylock-plugin, windowtolayer, $TERMINAL (Wayland-native), tmux,
 #           swaymsg, jq.
 
-# Ensure the fortress process is running before we lock, so the view is already
-# live when the lock surfaces attach. One shared session is mirrored to every
-# fortress output.
+# Ensure the fortress process(es) are running before we lock, so the view is
+# already live when the lock surfaces attach.
 _wl_ensure_fortresses() {
-	ensure_df_running "$(df_session_name)" || true
+	if [ "$FORTRESS_MODE" = multi ]; then
+		# One DF per fortress output, each on a distinct save: accumulate the
+		# saves already claimed this round and exclude them from the next pick so
+		# two fortresses never open the same region (which would corrupt it).
+		local name role sess save claimed=""
+		while read -r name role; do
+			[ "$role" = fortress ] || continue
+			sess="$(df_session_name "$name")"
+			df_session_running "$sess" && continue
+			save="$(pick_save "$claimed")"
+			[ -n "$save" ] && claimed="${claimed:+$claimed|}$save"
+			ensure_df_running "$sess" "$save" || true
+		done < <(classify_outputs)
+		# Guarantee at least one session exists (feeds the log outputs too).
+		tmux list-sessions -F '#{session_name}' 2>/dev/null \
+			| grep -qE "^${SESSION}(_|$)" || ensure_df_running "$(df_session_name)" || true
+	else
+		ensure_df_running "$(df_session_name)" || true
+	fi
 }
 
 backend_lock() {
@@ -69,7 +86,7 @@ backend_render() {
 	# fortress on landscape outputs, the df-ai log on portrait (rotated) ones.
 	local out="${SWAYLOCK_PLUGIN_OUTPUT_NAME:-}"
 	local role; role="$(output_role "$out")"
-	local sess; sess="$(df_session_name)"
+	local sess; sess="$(df_session_name "$out")"
 	echo ">> output=$out role=$role session=$sess" >>"$rlog"
 
 	# The inner command is kept alive on failure so the terminal (and thus the
@@ -94,7 +111,7 @@ backend_render() {
 	# show the same grid centered with padding around it, and — because every
 	# fortress foot now renders one identical grid — the shared tmux session has a
 	# single consistent size (no top-left "dots"). foot-only; the log tails fill.
-	if [ "$role" != log ] && [ "$TERMINAL" = foot ]; then
+	if [ "$role" != log ] && [ "$TERMINAL" = foot ] && [ "$FORTRESS_MODE" != multi ]; then
 		local ref this rw rh ow oh px py
 		ref="$(smallest_fortress_pixels)"
 		this="$(output_pixels "$out")"
