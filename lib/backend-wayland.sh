@@ -349,6 +349,21 @@ backend_render() {
 		fi
 	fi
 
+	# Frame mode (foot with exact cells): instead of a flat padded border, the
+	# terminal grid covers the whole output and a per-output tmux "frame"
+	# session (lib/frame.sh, its own server socket so it never counts as a
+	# client of the shared DF session) draws Dwarf Fortress scenery -- surface,
+	# raw stone, magma, smoothed walls -- around a borderless popup of exactly
+	# the shared grid that holds the fortress. The popup is centred by tmux, so
+	# no pad is needed; foot only centres the sub-cell remainder.
+	local -a frameopts=()
+	if [ -n "$cellpx" ] && [ "${FORTRESS_FRAME:-1}" != 0 ]; then
+		px=0; py=0
+		frameopts=(-o "pad=0x0 center" -o "colors.background=${FORTRESS_BACKGROUND:-000000}")
+		inner="printf '\n  Dwarf Fortress fishbowl - attaching...\n'; while :; do pgrep -x swaylock-plugin >/dev/null 2>&1 || { sleep 3; pgrep -x swaylock-plugin >/dev/null 2>&1 || exit 0; }; tmux -L 'df_fishbowl-frame-${out}' -f '$ROOT/lib/frame.tmux.conf' new-session -A -s frame '$ROOT/lib/frame.sh $gcols $grows $sess' 2>/dev/null; printf '\n  Dwarf Fortress screensaver - waiting for DF...\n'; sleep 5; done"
+		echo ">> frame: grid ${gcols}x${grows} in a $((ow / cellpx))x$((oh / cellpx)) scenery grid" >>"$rlog"
+	fi
+
 	# Apply the centring pad (shared by both fit modes).
 	if [ "$dopad" = 1 ] && { [ "$px" -gt 0 ] || [ "$py" -gt 0 ]; }; then
 		case "$TERMINAL" in
@@ -426,7 +441,7 @@ backend_render() {
 	case "$TERMINAL" in
 	havoc) term=("$TERMINAL" sh -c "$inner") ;;
 	kitty) term=("$TERMINAL" "${fontopts[@]}" sh -c "$inner") ;;
-	foot | alacritty) term=("$TERMINAL" "${footopts[@]}" "${fontopts[@]}" -e sh -c "$inner") ;;
+	foot | alacritty) term=("$TERMINAL" "${footopts[@]}" "${frameopts[@]}" "${fontopts[@]}" -e sh -c "$inner") ;;
 	*) term=("$TERMINAL" -e sh -c "$inner") ;;
 	esac
 

@@ -124,6 +124,8 @@ surface:
 | `FORTRESS_FIT` | `scale` | how mirrored screens share one grid: `scale` = size the font per screen so all share the reference grid, then pad the remainder; `pad` = no scaling, inset every grid to the smallest screen (see *Multiple displays*) |
 | `FORTRESS_REF` | `largest` | with `FORTRESS_FIT=scale`, which screen fills edge to edge: `largest` or `smallest` |
 | `FORTRESS_BASE_FONT_SIZE` | `9` | the main tile-size dial: point size on the smallest fortress screen; others scale from it |
+| `FORTRESS_FRAME` | `1` | draw Dwarf Fortress scenery (surface, stone, magma, walls) around the fortress where a screen's aspect leaves room; `0` = plain border |
+| `FORTRESS_BACKGROUND` | `000000` | background of the fortress terminal (sky / plain border), hex RGB |
 | `NEW_FORT_CHANCE` | `10` | % chance to embark a new fort vs. load a save |
 | `SAVE_MAX_AGE_DAYS` | `30` | prune saves older than this |
 | `MAX_SAVES` | `10` | keep only this many most recently played forts (0 = no cap) |
@@ -153,7 +155,11 @@ pads the remainder to centre it: the `FORTRESS_REF` screen fills edge to edge
 and the others are centred with a thin border. With `foot` the grid is exact:
 the cell is pinned to a whole number of pixels (`pixelsize` for the advance,
 `line-height` for the row), so the grid is plain integer division and every
-screen shows the identical fortress. Other terminals get a scaled point size,
+screen shows the identical fortress. Where a screen's aspect leaves room
+around that grid, a per-output tmux session draws a Dwarf Fortress cross
+section there (grass and trees above, stone with ore and gem veins beside and
+below, magma at the bottom, smoothed walls around the fort) and hosts the
+fortress in a borderless popup (`FORTRESS_FRAME`, `lib/frame.sh`). Other terminals get a scaled point size,
 and the font's metric rounding can leave their grids a cell or two apart; the
 shared session uses tmux `window-size=smallest` (`MIRROR_SIZE`), so a screen
 with a slightly larger grid shows a thin band of filler dots rather than losing
