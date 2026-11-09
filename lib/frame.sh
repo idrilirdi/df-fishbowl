@@ -18,11 +18,20 @@
 # veins the deeper it goes, then ≈ magma. Glyphs are CP437 classics present in
 # unscii-8; ☼ is not, so it is avoided (a fallback font would break the square
 # cell).
-cols="${1:?cols}" rows="${2:?rows}" sess="${3:?session}"
+# Test hook: `frame.sh --draw W H COLS ROWS [MSG]` prints one frame for a
+# W x H terminal to stdout and exits, without tmux (tests/frame.py).
+if [ "${1:-}" = --draw ]; then
+	FRAME_W="$2" FRAME_H="$3" cols="$4" rows="$5"
+	draw_only=1
+	shift 5
+	msg="${1:-}"
+else
+	cols="${1:?cols}" rows="${2:?rows}" sess="${3:?session}"
+fi
 
 draw() {
 	local msg="$1" W H
-	W=$(tput cols) H=$(tput lines)
+	W="${FRAME_W:-$(tput cols)}" H="${FRAME_H:-$(tput lines)}"
 	awk -v W="$W" -v H="$H" -v C="$cols" -v R="$rows" -v msg="$msg" -v seed="$RANDOM" '
 	function sgr(code) { if (code != cur) { out = out "\033[" code "m"; cur = code } }
 	function put(code, ch) { sgr(code); out = out ch }
@@ -130,6 +139,12 @@ draw() {
 		printf "%s", out
 	}'
 }
+
+if [ "${draw_only:-0}" = 1 ]; then
+	draw "$msg"
+	printf '\n'
+	exit 0
+fi
 
 # Hide the cursor; the pane only ever shows scenery.
 printf '\033[?25l'

@@ -16,6 +16,10 @@ unlock it quicksaves and stops so it isn't burning CPU behind your back.
 > **Status:** works on **Sway/Wayland**. An X11 backend is included but
 > **untested** — treat it as a starting point.
 
+`tests/run.sh` runs the unit tests (bash + python3, no other dependencies):
+the shared-grid fit across screen combinations and the scenery frame across
+terminal shapes.
+
 ---
 
 ## How it works

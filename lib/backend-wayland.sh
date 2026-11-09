@@ -168,13 +168,19 @@ backend_lock() {
 # plain integer division. The reference screen picks the grid from the base
 # size; every other screen takes the largest W that still fits that grid and
 # pads the remainder to centre it. Exact at integer output scale.
-# The base size only sets a TARGET cell: the grid it implies may divide the
-# other screens badly (a 14px 4K grid of 274x154 forced 9px cells on a
-# 2560x1600 laptop with a 47x107 border; 15px gives 256x144, which is exactly
-# 10px cells there and only the 16:9-vs-16:10 band remains). So nearby cell
-# sizes (+-20%, at least +-2px) are tried and the one wasting the least screen
-# area summed over all fortress outputs wins; ties go to the size nearest the
-# target.
+# The base size only sets a TARGET cell, and the reference box only a
+# PREFERRED grid source: the grid they imply may divide the other screens
+# badly (a 14px 4K grid of 274x154 forced 9px cells on a 2560x1600 laptop with
+# a 47x107 border; 15px gives 256x144, which is exactly 10px cells there and
+# only the 16:9-vs-16:10 band remains), and when the reference is a per-axis
+# box that matches no real screen (2327x1454 + 2560x1440 -> 2560x1454) a grid
+# cut from it fits nothing. So candidate grids are cut from every fortress
+# screen's own box as well as the reference box, at cell sizes near the target
+# (+-20%, at least +-2px), and the candidate wasting the least screen area
+# summed over all fortress outputs wins. FORTRESS_REF stays a real preference:
+# a grid from another screen is taken only when it wastes at least 5 points
+# less in total (two screens that can trade the same band keep the reference
+# one filled); ties go to the cell size nearest the target.
 #   $1 reference WxH  $2 smallest fortress WxH  $3 this output WxH
 #   $4 base point size on the smallest screen (FORTRESS_BASE_FONT_SIZE)
 #   $5 every fortress output as "WxH WxH ..." (space separated)
@@ -186,31 +192,45 @@ _wl_exact_fit() {
 		n = split(all, a, " ")
 		# pt -> px at 96 dpi, the size the smallest screen renders at
 		wmin = int(base * 96 / 72 + 0.5); if (wmin < 1) wmin = 1
-		kx = s[1] / r[1]; ky = s[2] / r[2]; kmin = (kx < ky ? kx : ky)
-		if (kmin <= 0) kmin = 1
-		wref = int(wmin / kmin + 0.5); if (wref < 1) wref = 1
-		# Try reference cells near the target; keep the least wasted area.
-		span = int(wref * 0.2 + 0.5); if (span < 2) span = 2
-		lo = wref - span; if (lo < 1) lo = 1
-		best = -1
-		for (c = lo; c <= wref + span; c++) {
-			cols = int(r[1] / c); rows = int(r[2] / c)
-			if (cols < 1 || rows < 1) continue
-			waste = 0
-			for (i = 1; i <= n; i++) {
-				split(a[i], q, "x")
-				if (q[1] <= 0 || q[2] <= 0) continue
-				w = int(q[1] / cols); wy = int(q[2] / rows); if (wy < w) w = wy
-				if (w < 1) { waste = 1e9; break }
-				waste += 1 - (cols * rows * w * w) / (q[1] * q[2])
-			}
-			d = (c > wref ? c - wref : wref - c)
-			if (best < 0 || waste < bestw - 1e-9 || (waste < bestw + 1e-9 && d < bestd)) {
-				best = c; bestw = waste; bestd = d
+		# Grid sources: the reference box first (it wins ties), then every screen.
+		nb = 1; bx[1] = r[1]; by[1] = r[2]
+		for (i = 1; i <= n; i++) {
+			split(a[i], q, "x")
+			if (q[1] <= 0 || q[2] <= 0) continue
+			nb++; bx[nb] = q[1]; by[nb] = q[2]
+		}
+		best = -1; bestref = -1
+		for (b = 1; b <= nb; b++) {
+			# Target cell on this box: the base cell on the smallest screen,
+			# scaled by how much bigger the box is.
+			kx = s[1] / bx[b]; ky = s[2] / by[b]; kmin = (kx < ky ? kx : ky)
+			if (kmin <= 0) kmin = 1
+			wref = int(wmin / kmin + 0.5); if (wref < 1) wref = 1
+			span = int(wref * 0.2 + 0.5); if (span < 2) span = 2
+			lo = wref - span; if (lo < 1) lo = 1
+			for (c = lo; c <= wref + span; c++) {
+				cols = int(bx[b] / c); rows = int(by[b] / c)
+				if (cols < 1 || rows < 1) continue
+				waste = 0
+				for (i = 1; i <= n; i++) {
+					split(a[i], q, "x")
+					if (q[1] <= 0 || q[2] <= 0) continue
+					w = int(q[1] / cols); wy = int(q[2] / rows); if (wy < w) w = wy
+					if (w < 1) { waste = 1e9; break }
+					waste += 1 - (cols * rows * w * w) / (q[1] * q[2])
+				}
+				d = (c > wref ? c - wref : wref - c)
+				if (b == 1 && (bestref < 0 || waste < bestrw - 1e-9 || (waste < bestrw + 1e-9 && d < bestrd))) {
+					bestref = c; bestrw = waste; bestrd = d; refcols = cols; refrows = rows
+				}
+				if (best < 0 || waste < bestw - 1e-9 || (waste < bestw + 1e-9 && d < bestd)) {
+					best = c; bestw = waste; bestd = d; bestcols = cols; bestrows = rows
+				}
 			}
 		}
-		if (best < 0) best = wref
-		cols = int(r[1] / best); rows = int(r[2] / best)
+		if (best < 0) { cols = int(r[1] / wmin); rows = int(r[2] / wmin) }
+		else if (bestref >= 0 && bestw > bestrw - 0.05) { cols = refcols; rows = refrows }
+		else { cols = bestcols; rows = bestrows }
 		if (cols < 1) cols = 1; if (rows < 1) rows = 1
 		w = int(o[1] / cols); wy = int(o[2] / rows); if (wy < w) w = wy
 		if (w < 1) w = 1
