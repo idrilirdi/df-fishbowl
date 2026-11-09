@@ -59,7 +59,7 @@ backend_render() {
 	local -a inner
 	case "$role" in
 	log) inner=(tail -n 200 -F "$LOG_FILE") ;;
-	*) inner=(tmux attach -r -t "$sess") ;;
+	*) inner=(tmux attach -f read-only -t "$sess") ;;
 	esac
 
 	# Terminal embedding is terminal-specific.

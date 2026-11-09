@@ -32,6 +32,11 @@ ROOT="$(dirname "$(dirname "$SELF")")"   # .../screensaver
 USER_CONF="${XDG_CONFIG_HOME:-$HOME/.config}/df_fishbowl/config"
 # shellcheck source=/dev/null
 [ -f "$USER_CONF" ] && . "$USER_CONF"
+# Derived defaults come last so they follow the user's overrides: deriving
+# LOG_FILE in the shipped config bound it to the DEFAULT DF_HOME, and a user
+# config that only moved DF_HOME left the log output tailing a file that did
+# not exist.
+LOG_FILE="${LOG_FILE:-$DF_HOME/df-ai.log}"
 
 # --- Load shared helpers ---------------------------------------------------
 # shellcheck source=/dev/null

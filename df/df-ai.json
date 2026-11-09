@@ -9,13 +9,13 @@
 	"embark_options" : 
 	{
 		"AquiferHeavy" : 0,
-		"AquiferLight" : 0,
+		"AquiferLight" : -1,
 		"BottomlessPit" : -1,
 		"Chasm" : -1,
 		"Clay" : -1,
 		"DeepMetal" : -1,
-		"DimensionX" : 4,
-		"DimensionY" : 4,
+		"DimensionX" : 5,
+		"DimensionY" : 5,
 		"Drainage" : -1,
 		"Elevation" : -1,
 		"Evil" : -1,
@@ -25,7 +25,7 @@
 		"OtherFeatures" : -1,
 		"Rain" : -1,
 		"River" : -1,
-		"Savagery" : 2,
+		"Savagery" : -1,
 		"ShallowMetal" : -1,
 		"Soil" : -1,
 		"Temperature" : -1,
@@ -41,7 +41,7 @@
 	// true or false: should the AI assign administrators in the fortress?
 	"manage_nobles" : true,
 	// true or false: should the AI keep the game running after it loses?
-	"no_quit" : false,
+	"no_quit" : true,
 	// true or false: should the AI automatically pick an embark location?
 	"random_embark" : true,
 	// the name of the region to embark on, between quotes, or "" to generate a new world.
@@ -49,7 +49,7 @@
 	// true or false: should the AI automatically record CMV files while it plays?
 	"record_movie" : false,
 	// 0: pocket, 1: smaller, 2: small, 3: medium, 4: large
-	"world_size" : 4,
+	"world_size" : 2,
 	// true or false: should the AI say what it's thinking in the DFHack console?
 	"write_console" : true,
 	// true or false: should the AI say what it's thinking in df-ai.log?

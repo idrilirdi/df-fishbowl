@@ -78,7 +78,7 @@ displays*), which is `foot`-only.
 
 ## Requirements
 
-`tmux`, `jq`, a terminal (above), and — built from source by the installer —
+`tmux` (>= 3.2), `jq`, a terminal (above), and — built from source by the installer —
 `swaylock-plugin` + `windowtolayer` (and optionally `havoc`). swaylock-plugin
 authenticates via the distro **`swaylock` PAM service**, so keep the `swaylock`
 package installed (`/etc/pam.d/swaylock`). Build deps (Debian/Ubuntu) are listed
@@ -120,14 +120,20 @@ surface:
 | `SESSION` | `df_fishbowl` | tmux session name for the running DF |
 | `TERMINAL` | `foot` | display terminal (see Terminals) |
 | `FORTRESS_FONT` | `unscii` | font for the fortress terminal only, set per-invocation; a square font un-stretches the map (see *Font*). Blank = terminal default |
-| `FORTRESS_FONT_SIZE` | *(empty)* | point size for `FORTRESS_FONT`; empty = terminal default |
+| `FORTRESS_FONT_SIZE` | *(empty)* | point size for `FORTRESS_FONT` on the smallest fortress screen; empty = use `FORTRESS_BASE_FONT_SIZE` |
+| `FORTRESS_FIT` | `scale` | how mirrored screens share one grid: `scale` = size the font per screen so all share the reference grid, then pad the remainder; `pad` = no scaling, inset every grid to the smallest screen (see *Multiple displays*) |
+| `FORTRESS_REF` | `largest` | with `FORTRESS_FIT=scale`, which screen fills edge to edge: `largest` or `smallest` |
+| `FORTRESS_BASE_FONT_SIZE` | `9` | the main tile-size dial: point size on the smallest fortress screen; others scale from it |
 | `NEW_FORT_CHANCE` | `10` | % chance to embark a new fort vs. load a save |
 | `SAVE_MAX_AGE_DAYS` | `30` | prune saves older than this |
+| `MAX_SAVES` | `10` | keep only this many most recently played forts (0 = no cap) |
 | `FORTRESS_MODE` | `single` | `single` = one sim mirrored to all fortress outputs; `multi` = one sim per fortress output |
 | `LOG_ON_SMALLER_HORIZONTAL` | `1` | with 2+ landscape outputs and no portrait one, put the log on the smallest landscape |
-| `MIRROR_SIZE` | `largest` | shared tmux grid for non-`foot` terminals; `foot` pads/centers the fortress and always uses `largest` (see *Multiple displays*) |
+| `MIRROR_SIZE` | `smallest` | shared tmux grid: `smallest` never cuts content off (a thin filler band at worst); `largest` fills the biggest screen and clips the others |
 | `SAVE_FLUSH_SECS` | `3` | wait after quicksave before quitting |
 | `STOP_TIMEOUT` | `15` | grace period before SIGKILL on stop |
+| `RPC_TIMEOUT` | `10` | seconds to wait for DF to answer `dfhack-run` (quicksave) before stopping it anyway |
+| `LIFECYCLE_LOCK_WAIT` | `120` | starts and stops are serialised; seconds one waits for the other |
 | `DF_FISHBOWL_BACKEND` | *(auto)* | force `wayland` or `x11` |
 
 ### Multiple displays
@@ -141,13 +147,20 @@ Roles are assigned from output orientation:
 
 In `single` mode all fortress outputs mirror one simulation via tmux. A terminal
 fills each output under the lock and can't be pixel-scaled, so the fortresses
-share **one** grid. With the default `foot`, the render step pads every fortress
-terminal down to the smallest fortress output's grid: that screen fills exactly
-and larger screens show the same grid **centered** (padding around it). Because
-the per-screen grids can still differ by a cell or two (rounding), the shared
-session uses tmux `window-size=largest`, which trims that as invisible edge
-clipping rather than leaving asymmetric dot bands. `MIRROR_SIZE` selects the
-shared grid only for terminals that can't pad. Because
+share **one** grid. With the default `FORTRESS_FIT=scale` the render step
+sizes the font per screen so every fortress terminal gets the same grid, then
+pads the remainder to centre it: the `FORTRESS_REF` screen fills edge to edge
+and the others are centred with a thin border. With `foot` the grid is exact:
+the cell is pinned to a whole number of pixels (`pixelsize` for the advance,
+`line-height` for the row), so the grid is plain integer division and every
+screen shows the identical fortress. Other terminals get a scaled point size,
+and the font's metric rounding can leave their grids a cell or two apart; the
+shared session uses tmux `window-size=smallest` (`MIRROR_SIZE`), so a screen
+with a slightly larger grid shows a thin band of filler dots rather than losing
+content.
+`FORTRESS_FIT=pad` skips the scaling and insets every grid to the smallest
+screen — exact, but a much bigger screen is mostly border, and the large pads
+need `foot` (alacritty's padding is capped at 255px). Because
 differently-sized/aspected screens can't all be *filled* by one text grid, use
 **`FORTRESS_MODE=multi`** for an independent, natively-full fortress on each
 screen (one df-ai simulation per fortress screen — more CPU, but every screen is
@@ -183,6 +196,16 @@ See [`integration/`](integration/):
 - `integration/swayidle.conf` — how to point an idle-lock timeout at
   `df_fishbowl lock` (with `resume 'df_fishbowl stop'`), keeping your dim/suspend
   timeouts.
+- `integration/sway-portals.conf` — drop at
+  `~/.config/xdg-desktop-portal/sway-portals.conf` (then
+  `systemctl --user restart xdg-desktop-portal` and restart Firefox) so a
+  playing video keeps the fishbowl away. Without it, Firefox's "Playing video"
+  idle inhibit goes to xdg-desktop-portal-gtk, which reports success but only
+  creates an inhibitor on its own hidden window — sway ignores inhibitors on
+  invisible surfaces — so swayidle locks in the middle of a YouTube video. With
+  no Inhibit backend the portal call fails and Firefox falls back to the native
+  Wayland idle-inhibit protocol on its own (visible) window, which sway honours.
+  Check with `swaymsg -t get_tree | grep inhibit_idle` while a video plays.
 
 ## Dwarf Fortress 0.47.05 compatibility notes
 
@@ -196,8 +219,15 @@ files):
   `data/init/init.txt` so DF runs as a terminal program. DFHack's interactive
   console is disabled in TEXT mode, but df-ai plays regardless.
 - **`enable df-ai`** is appended to your `dfhack.init` if not already present.
-- **df-ai's config** — the one file fishbowl provides, [`df/df-ai.json`](df/df-ai.json)
-  (autonomous random embarks + logging), is copied to `hack/df-ai.json`.
+- **`PAUSE_ON_LOAD:NO`** (also `AUTOSAVE:SEASONAL`, `INITIAL_SAVE:YES`) is set in
+  `data/init/d_init.txt`, so a loaded fort plays on instead of waiting for a key.
+- **df-ai's config** — [`df/df-ai.json`](df/df-ai.json) (autonomous random
+  embarks + logging) is copied to `dfhack-config/df-ai.json`, which df-ai reads,
+  and to the legacy `hack/df-ai.json`.
+- **Unstick watchdog** — df-ai 0.47.05 freezes the fort forever on modal screens
+  it doesn't know (e.g. a diplomat meeting). [`df/fishbowl-unstick.lua`](df/fishbowl-unstick.lua)
+  is copied to `hack/scripts/` and scheduled from `onMapLoad.init` every ~500
+  frames; it dismisses a screen that stays up across two checks.
 - **SDL 1.2 runtime libraries** — the DF binary links them even in TEXT mode:
   `sudo apt install libsdl1.2debian libsdl-image1.2 libsdl-ttf2.0-0`.
 - **ncurses symlinks** — DF `dlopen`s `libncursesw.so`/`.so.5`, absent on
@@ -210,10 +240,15 @@ files):
   fell back to a plain (still working) password lock. Check
   `~/.cache/df_fishbowl-render.log`. Common causes: missing swaylock-plugin patch
   for your terminal, or DF not running.
-- **Fortress off-centre / dots around it** — with `foot` the fortress is padded
-  to a shared grid and centered; if it isn't, you're likely on an old
-  swaylock-plugin without patch #1 (rebuild with the patches), or on a non-`foot`
-  terminal (which can't pad — pick the trade-off with `MIRROR_SIZE`).
+- **Fortress small in the top-left corner, dots around it** — the shared tmux
+  window is stuck at a stale size. fishbowl's viewers attach with
+  `tmux attach -f read-only` (needs tmux >= 3.2); never `-r`, which also sets
+  `ignore-size`, and tmux skips such clients whenever any normal client is
+  attached anywhere on the same server.
+- **Fortress off-centre / thin dot band** — check the `fitting fortress` lines in
+  `~/.cache/df_fishbowl-render.log`. A band of a cell or two is expected rounding
+  (see *Multiple displays*); more than that usually means an old swaylock-plugin
+  without patch #1, or a non-`foot` terminal under `FORTRESS_FIT=pad`.
 - **Can't unlock** — your password always works even when the background fails;
   the lock never depends on DF.
 

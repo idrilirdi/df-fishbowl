@@ -18,34 +18,78 @@ pick_save() {
 	local roll
 	roll=$(shuf -i 1-100 -n1)
 	if [ "$roll" -le "$NEW_FORT_CHANCE" ]; then
-		log_msg "rolled $roll <= ${NEW_FORT_CHANCE}%: generating a NEW fortress"
+		log_msg "rolled $roll <= ${NEW_FORT_CHANCE}%: generating a NEW world"
 		return 0
 	fi
+	# A RESUMABLE fort is a regionN folder that contains a completed world.sav;
+	# folders with only world.dat are un-started worlds df-ai can't continue (it
+	# would embark fresh). Pick a resumable one at random to continue; if there is
+	# none, generate a new world.
 	local saves save
-	saves=$(find "$DF_HOME/data/save" -mindepth 1 -maxdepth 1 -type d \
-		! -name current -printf '%f\n' 2>/dev/null)
+	saves=$(find "$DF_HOME/data/save" -mindepth 1 -maxdepth 1 -type d ! -name current \
+		-exec test -f '{}/world.sav' ';' -printf '%f\n' 2>/dev/null)
 	[ -n "$exclude" ] && saves=$(printf '%s\n' "$saves" | grep -vxE "$exclude" || true)
 	save=$(printf '%s\n' "$saves" | grep -v '^$' | shuf -n1)
 	if [ -n "$save" ]; then
-		log_msg "loading existing save: $save"
+		log_msg "continuing existing fort: $save"
 		printf '%s\n' "$save"
 	else
-		log_msg "no (unclaimed) save available: generating a NEW fortress"
+		log_msg "no resumable fort found: generating a NEW world"
 	fi
 }
 
-# Delete saved fortresses older than SAVE_MAX_AGE_DAYS. `current` is preserved.
+# Prune saved fortresses: first by age (SAVE_MAX_AGE_DAYS), then by count
+# (MAX_SAVES, keeping the most recently played). `current` is always preserved,
+# as is the world df-ai is configured to play. A fort is ~20-60MB, so an
+# unattended screensaver that rolls new worlds will otherwise fill the disk.
 cleanup_saves() {
 	local dir="$DF_HOME/data/save"
 	[ -d "$dir" ] || return 0
+
+	# Never prune while a fortress is live: DF holds the save dir open and
+	# deleting under it can corrupt the world.
+	if pgrep -f 'libs/Dwarf_Fortress' >/dev/null 2>&1; then
+		log_msg "skipping save cleanup: DF is running"
+		return 0
+	fi
+
+	# The world df-ai is pointed at must survive even if it is the oldest.
+	local keep=""
+	keep=$(sed -nE 's/.*"random_embark_world"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' \
+		"$DF_HOME/dfhack-config/df-ai.json" 2>/dev/null | head -1)
+
+	# --- by age ---
 	local old
 	old=$(find "$dir" -mindepth 1 -maxdepth 1 -type d ! -name current \
 		-mtime +"$SAVE_MAX_AGE_DAYS" -printf '%f ' 2>/dev/null)
 	if [ -n "$old" ]; then
-		log_msg "cleaning up saves older than ${SAVE_MAX_AGE_DAYS}d: $old"
-		find "$dir" -mindepth 1 -maxdepth 1 -type d ! -name current \
-			-mtime +"$SAVE_MAX_AGE_DAYS" -exec rm -rf {} + 2>/dev/null || true
+		local o
+		for o in $old; do
+			[ "$o" = "$keep" ] && continue
+			log_msg "cleaning up save older than ${SAVE_MAX_AGE_DAYS}d: $o"
+			rm -rf -- "$dir/$o" 2>/dev/null || true
+		done
 	fi
+
+	# --- by count: keep the MAX_SAVES most recently played ---
+	local max="${MAX_SAVES:-0}"
+	case "$max" in '' | *[!0-9]*) return 0 ;; esac
+	[ "$max" -le 0 ] && return 0
+
+	local all n
+	# newest first, so anything past the cap is the least recently played
+	all=$(find "$dir" -mindepth 1 -maxdepth 1 -type d ! -name current \
+		-printf '%T@ %f\n' 2>/dev/null | sort -rn | awk '{print $2}')
+	n=0
+	local r
+	for r in $all; do
+		[ "$r" = "$keep" ] && continue
+		n=$((n + 1))
+		if [ "$n" -gt "$max" ]; then
+			log_msg "pruning excess save (over MAX_SAVES=$max, least recently played): $r"
+			rm -rf -- "$dir/$r" 2>/dev/null || true
+		fi
+	done
 }
 
 # ---------------------------------------------------------------------------
@@ -64,6 +108,42 @@ df_session_name() {
 
 df_session_running() { tmux has-session -t "$1" 2>/dev/null; }
 
+# --- Serialised start/stop --------------------------------------------------
+# A start and a stop must never overlap. On unlock the lock shell tears DF down
+# while swayidle's `resume` hook may run `df_fishbowl stop` and the next idle
+# lock may already be starting DF: without a lock the new lock adopts a
+# fortress that is about to be killed. Every start/stop runs under this lock
+# (fd 8), so a start waits for an in-flight stop and then starts fresh.
+_LIFECYCLE_LOCK="${XDG_RUNTIME_DIR:-/tmp}/df_fishbowl-lifecycle.lock"
+with_lifecycle_lock() {
+	if command -v flock >/dev/null 2>&1; then
+		(
+			# No `2>/dev/null` on a bare exec: it would redirect THIS shell's
+			# stderr for good, swallowing every log_msg (and error) from the
+			# start/stop below. That hid "dfhack not found" for a week (2026-11).
+			{ exec 8>>"$_LIFECYCLE_LOCK"; } 2>/dev/null || exec 8>/dev/null
+			flock -w "${LIFECYCLE_LOCK_WAIT:-120}" 8 \
+				|| log_msg "WARNING: start/stop lock still busy after ${LIFECYCLE_LOCK_WAIT:-120}s — proceeding anyway"
+			"$@"
+		)
+	else
+		"$@"
+	fi
+}
+
+# Call DFHack's RPC client with a hard time limit. dfhack-run blocks until DF's
+# main loop services the request, so a frozen DF (stuck save, modal dialog,
+# world-gen) would otherwise block the caller FOREVER — which is exactly how
+# unlocks used to leave DF running: the stop never got past the quicksave.
+# Returns 124 on timeout; any other dfhack-run status is ignored (as before).
+_rpc() {
+	[ -x "$DF_HOME/dfhack-run" ] || return 1
+	local rc=0
+	timeout -k 2 "${RPC_TIMEOUT:-10}" "$DF_HOME/dfhack-run" "$@" >/dev/null 2>&1 8>&- || rc=$?
+	case "$rc" in 124 | 137) return 124 ;; esac
+	return 0
+}
+
 # Align df-ai's embark settings with our load decision, in place in df-ai.json.
 # df-ai's `random_embark` auto-embarks a NEW fort at startup, which OVERWRITES
 # whatever save was loaded — so continuing an existing fortress requires it OFF
@@ -73,22 +153,30 @@ df_session_running() { tmux has-session -t "$1" 2>/dev/null; }
 # has // comments so jq can't parse it; edit the two fields with sed.
 #   configure_dfai continue [WORLD]   # play the loaded save, do not re-embark
 #   configure_dfai new                # generate a new world and embark
+# Point df-ai at the world to play. At the title screen df-ai chooses "Continue
+# Game" when data/save/<random_embark_world>/world.sav exists (resume), else
+# "Start Game"/"New World" (fresh). So $1 = a regionN to continue, or "" for a
+# brand-new world. random_embark stays TRUE — it only controls auto-picking the
+# embark tile for a new fort, NOT whether to continue. df-ai reads
+# dfhack-config/df-ai.json (older layouts also keep hack/df-ai.json); write both.
 configure_dfai() {
-	local mode="$1" world="${2:-}" json="$DF_HOME/hack/df-ai.json"
-	[ -f "$json" ] || return 0
-	local embark ew
-	if [ "$mode" = new ]; then embark=true; ew=""; else embark=false; ew="$world"; fi
-	sed -i -E \
-		-e "s/(\"random_embark\"[[:space:]]*:[[:space:]]*)(true|false)/\1${embark}/" \
-		-e "s/(\"random_embark_world\"[[:space:]]*:[[:space:]]*)\"[^\"]*\"/\1\"${ew}\"/" \
-		"$json" 2>/dev/null || true
-	log_msg "df-ai: random_embark=$embark random_embark_world=\"$ew\" ($mode)"
+	local world="${1:-}"
+	local json wrote=0
+	for json in "$DF_HOME/dfhack-config/df-ai.json" "$DF_HOME/hack/df-ai.json"; do
+		[ -f "$json" ] || continue
+		sed -i -E \
+			-e "s/(\"random_embark\"[[:space:]]*:[[:space:]]*)(true|false)/\1true/" \
+			-e "s/(\"random_embark_world\"[[:space:]]*:[[:space:]]*)\"[^\"]*\"/\1\"${world}\"/" \
+			"$json" 2>/dev/null && wrote=$((wrote + 1))
+	done
+	log_msg "df-ai: random_embark_world=\"${world:-(new world)}\" ($wrote file[s])"
 }
 
 # Start DF (if not already running) in a detached tmux session named $1. df-ai
 # plays autonomously; configure_dfai makes it continue a loaded save or embark a
 # brand-new world, matching pick_save's choice.
-ensure_df_running() {
+ensure_df_running() { with_lifecycle_lock _ensure_df_running_locked "$@"; }
+_ensure_df_running_locked() {
 	local sess="$1"
 	df_session_running "$sess" && return 0
 
@@ -98,32 +186,34 @@ ensure_df_running() {
 	}
 
 	cleanup_saves
-	# $2 (if passed, even empty) is an explicit save: the caller has already
-	# chosen it (multi mode, to keep each fortress distinct). Otherwise pick one
-	# here (single mode). An empty save means "new fortress".
-	local save load=""
-	if [ "$#" -ge 2 ]; then save="$2"; else save="$(pick_save)"; fi
-	[ -n "$save" ] && load="+load-save $save"
+	# Choose the world df-ai should play: a resumable regionN to continue, or ""
+	# for a new world. In multi mode $2 pre-selects it (distinct per output).
+	local world
+	if [ "$#" -ge 2 ]; then world="$2"; else world="$(pick_save)"; fi
+	configure_dfai "$world"
 
-	# Continue the chosen save (don't let df-ai re-embark over it), or generate a
-	# fresh world when starting a new fortress.
-	if [ -n "$save" ]; then configure_dfai continue "$save"; else configure_dfai new; fi
-
-	log_msg "starting DF in tmux session '$sess' ${load:-(new fortress)}"
-	# exec replaces the shell so the pane PID *is* the dfhack/DF process.
+	log_msg "starting DF in tmux session '$sess' (${world:+continuing }${world:-new world})"
+	# Launch PLAIN — NOT +load-save. df-ai (enabled via dfhack.init) drives the
+	# title screen itself and picks Continue Game vs new world from
+	# random_embark_world; loading a fort with +load-save lands df-ai in an
+	# "unknown viewscreen" it can't play. exec makes the pane PID the DF process.
 	tmux new-session -d -s "$sess" -x 250 -y 70 \
-		"cd '$DF_HOME' && exec ./dfhack $load"
+		"cd '$DF_HOME' && exec ./dfhack" 8>&-
 	# No status bar — this is a screensaver, so the fortress fills the terminal
 	# with no tmux chrome.
 	tmux set-option -t "$sess" status off >/dev/null 2>&1 || true
-	# The mirrored fortress shares ONE tmux grid across screens. With foot the
-	# render step pads every fortress terminal down to the smallest fortress
-	# output's grid, so all fortress grids are near-identical (±1-2 cells, since
-	# outputs can differ in scale). window-size=smallest makes the session the
+	# The mirrored fortress shares ONE tmux grid across screens. The render step
+	# equalises the grids (FORTRESS_FIT: scale the font per output, then pad the
+	# remainder), so all fortress grids are near-identical (±1-2 cells from
+	# integer cell rounding). window-size=smallest makes the session the
 	# SMALLEST of those grids: no screen is ever larger than the session, so
 	# nothing is clipped/cut off — a screen whose grid is a touch bigger shows a
 	# thin band of filler dots instead (added space, never lost content). Prefer
 	# this over =largest, which fills the biggest grid but cuts off the others.
+	# Viewers MUST attach with `-f read-only`, never `-r`: `-r` also sets
+	# ignore-size, and tmux skips ignore-size clients whenever any normal client
+	# is attached anywhere on the server — the window then stays at a stale size,
+	# pushed into the top-left corner with filler dots around it.
 	tmux set-option -t "$sess" window-size "${MIRROR_SIZE:-smallest}" >/dev/null 2>&1 || true
 }
 
@@ -153,11 +243,49 @@ stop_df_session() {
 	ppid=$(tmux list-panes -t "$sess" -F '#{pane_pid}' 2>/dev/null | head -1)
 	[ -n "$ppid" ] && pgid=$(ps -o pgid= -p "$ppid" 2>/dev/null | tr -d ' ')
 
-	# 1. graceful save via DFHack's RPC client (works without the console).
+	# 1. graceful save via DFHack's RPC client. quicksave is ASYNCHRONOUS (it flags
+	#    a save DF writes over subsequent frames) and does nothing while the game
+	#    is paused, so: unpause, request the save, then WAIT until current/world.sav
+	#    is actually rewritten and stops changing — never a blind sleep that could
+	#    SIGTERM a large fort mid-write. Capped by SAVE_MAX_WAIT.
 	if [ -x "$DF_HOME/dfhack-run" ]; then
 		log_msg "quicksaving session '$sess'"
-		"$DF_HOME/dfhack-run" quicksave >/dev/null 2>&1 || true
-		sleep "$SAVE_FLUSH_SECS"
+		# df-ai plays the region named by random_embark_world; the save is written
+		# there (that's the resumable save the next launch continues). Watch its
+		# world.sav — fall back to current if unknown.
+		local rw
+		rw=$(sed -nE 's/.*"random_embark_world"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/p' \
+			"$DF_HOME/dfhack-config/df-ai.json" 2>/dev/null | head -1)
+		local sav="$DF_HOME/data/save/${rw:-current}/world.sav"
+		local before=0
+		[ -f "$sav" ] && before=$(stat -c %Y "$sav" 2>/dev/null || echo 0)
+		local rpc_ok=1
+		_rpc lua 'df.global.pause_state=false' && _rpc quicksave || rpc_ok=0
+		if [ "$rpc_ok" = 0 ]; then
+			log_msg "WARNING: DF did not answer dfhack-run within ${RPC_TIMEOUT:-10}s (frozen?) — skipping the save, stopping anyway"
+		fi
+		local waited=0 now=0 last=-1 stable=0
+		while [ "$rpc_ok" = 1 ] && [ "$waited" -lt "${SAVE_MAX_WAIT:-30}" ]; do
+			sleep 1
+			waited=$((waited + 1))
+			now=$(stat -c %Y "$sav" 2>/dev/null || echo 0)
+			# Once world.sav has been rewritten (mtime past pre-save), wait for it
+			# to hold steady for 2 checks (= the write has finished).
+			if [ "$now" -gt "$before" ]; then
+				if [ "$now" = "$last" ]; then
+					stable=$((stable + 1))
+					[ "$stable" -ge 2 ] && break
+				else
+					stable=0
+				fi
+			fi
+			last="$now"
+		done
+		if [ "$now" -gt "$before" ]; then
+			log_msg "save written and settled after ${waited}s ($sav)"
+		elif [ "$rpc_ok" = 1 ]; then
+			log_msg "WARNING: $sav not updated in ${waited}s — save may not have happened (paused/stuck?)"
+		fi
 	fi
 
 	# 2. graceful quit: signal the whole process group.
@@ -178,7 +306,8 @@ stop_df_session() {
 
 # Stop every df_fishbowl DF session (shared + any per-output ones) and sweep
 # stragglers. Backend-agnostic teardown.
-stop_all_df() {
+stop_all_df() { with_lifecycle_lock _stop_all_df_locked; }
+_stop_all_df_locked() {
 	local s
 	for s in $(tmux list-sessions -F '#{session_name}' 2>/dev/null \
 		| grep -E "^${SESSION}(_|$)" || true); do
@@ -187,6 +316,29 @@ stop_all_df() {
 	# Final safety sweep by binary name (cmdline is the relative ./libs/... path,
 	# so an absolute-path match would miss it).
 	pkill -9 -f 'libs/Dwarf_Fortress' 2>/dev/null || true
+	# ...and any dfhack-run client still waiting on a DF that no longer answers.
+	pkill -9 -f 'hack/dfhack-run' 2>/dev/null || true
+
+	# Janitor: reap orphaned lock renderers. swaylock-plugin does not reliably
+	# kill its --command-each children when a lock ends abnormally, so `_render`
+	# trees reparent to init and accumulate (observed: 45 across ~15 locks).
+	# Only when NO locker is running — never touch a live lock's renderers.
+	if ! pgrep -x swaylock-plugin >/dev/null 2>&1; then
+		local rpid rpgid mypg
+		mypg=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
+		for rpid in $(pgrep -f 'df_fishbowl _render' 2>/dev/null); do
+			[ "$(awk '{print $4}' "/proc/$rpid/stat" 2>/dev/null)" = 1 ] || continue
+			# The orphan's process group leader (the dead locker) is gone, so a
+			# group signal cleans the whole render tree (terminal included).
+			rpgid=$(ps -o pgid= -p "$rpid" 2>/dev/null | tr -d ' ')
+			if [ -n "$rpgid" ] && [ "$rpgid" != 1 ] && [ "$rpgid" != "$mypg" ]; then
+				kill -TERM -- "-$rpgid" 2>/dev/null || true
+			else
+				kill -TERM "$rpid" 2>/dev/null || true
+			fi
+		done
+	fi
+	return 0
 }
 
 # ---------------------------------------------------------------------------
@@ -234,10 +386,23 @@ output_role() {
 # consistent even when outputs differ in aspect ratio: a per-axis minimum always
 # fits inside each output, whereas the smallest-area output might be wider or
 # taller than another and not fit.
+# The pixel box every mirrored fortress output is fitted to (see FORTRESS_FIT).
+# FORTRESS_REF picks which output defines the shared grid:
+#   smallest - per-axis MIN over the fortress outputs: the largest box that fits
+#              inside all of them. Bigger screens scale UP from it, so glyphs are
+#              comfortable everywhere and the grid stays modest.
+#   largest  - per-axis MAX: the grid is set by the biggest screen (which then
+#              fills completely and shows the most map), and smaller screens
+#              scale DOWN — their glyphs get small.
 fortress_ref_pixels() {
-	assign_roles | awk '$2=="fortress"{
-			if (w == "" || $3 < w) w = $3
-			if (h == "" || $4 < h) h = $4
+	assign_roles | awk -v mode="${FORTRESS_REF:-largest}" '$2=="fortress"{
+			if (mode == "largest") {
+				if (w == "" || $3 > w) w = $3
+				if (h == "" || $4 > h) h = $4
+			} else {
+				if (w == "" || $3 < w) w = $3
+				if (h == "" || $4 < h) h = $4
+			}
 		} END { if (w != "") printf "%dx%d\n", w, h }'
 }
 
@@ -256,7 +421,7 @@ build_term_argv() {
 	local -a inner
 	case "$role" in
 	log) inner=(tail -n 200 -F "$LOG_FILE") ;;
-	*) inner=(tmux attach -r -t "$sess") ;;
+	*) inner=(tmux attach -f read-only -t "$sess") ;;
 	esac
 	case "$TERMINAL" in
 	kitty) TERM_ARGV=("$TERMINAL" "${inner[@]}") ;;
